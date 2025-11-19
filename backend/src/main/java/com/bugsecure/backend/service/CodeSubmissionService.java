@@ -1,0 +1,260 @@
+package com.bugsecure.backend.service;
+
+import com.bugsecure.backend.dto.CodeSubmissionDTO;
+import com.bugsecure.backend.model.CodeSubmission;
+import com.bugsecure.backend.model.SubmissionFile;
+import com.bugsecure.backend.model.User;
+import com.bugsecure.backend.repository.CodeSubmissionRepository;
+import com.bugsecure.backend.repository.SubmissionFileRepository;
+import com.bugsecure.backend.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+
+@Service
+public class CodeSubmissionService {
+
+    @Autowired
+    private CodeSubmissionRepository codeSubmissionRepository;
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private SubmissionFileRepository submissionFileRepository;
+
+    private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    @Transactional
+    public CodeSubmissionDTO createSubmission(CodeSubmissionDTO dto, String email) {
+        User company = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        if (!"COMPANY".equals(company.getRole())) {
+            throw new RuntimeException("Only companies can create submissions");
+        }
+
+        CodeSubmission submission = new CodeSubmission();
+        submission.setTitle(dto.getTitle());
+        submission.setDescription(dto.getDescription());
+        
+        // Handle primary file (for backward compatibility)
+        String primaryFileName = "code.txt";
+        String primaryCodeContent = "";
+        
+        if (dto.getFiles() != null && !dto.getFiles().isEmpty()) {
+            // Use first file as primary
+            Map<String, Object> firstFile = dto.getFiles().get(0);
+            primaryFileName = (String) firstFile.get("name");
+            primaryCodeContent = (String) firstFile.get("content");
+        } else if (dto.getFileName() != null && !dto.getFileName().isEmpty()) {
+            primaryFileName = dto.getFileName();
+            primaryCodeContent = dto.getCodeContent() != null ? dto.getCodeContent() : "";
+        } else if (dto.getCodeContent() != null && !dto.getCodeContent().isEmpty()) {
+            primaryFileName = "code.txt";
+            primaryCodeContent = dto.getCodeContent();
+        }
+        
+        submission.setFileName(primaryFileName);
+        submission.setCodeContent(primaryCodeContent);
+        
+        if (dto.getRewardAmount() == null || dto.getRewardAmount() <= 0) {
+            throw new RuntimeException("Reward amount must be greater than 0");
+        }
+        submission.setRewardAmount(dto.getRewardAmount());
+        submission.setWebsite(dto.getWebsite()); // Set website URL
+        submission.setCompany(company);
+        submission.setStatus("OPEN");
+        submission.setCreatedAtIfNew(); // Set timestamps for MongoDB
+
+        CodeSubmission saved = codeSubmissionRepository.save(submission);
+        
+        // Save additional files if provided
+        if (dto.getFiles() != null && !dto.getFiles().isEmpty()) {
+            for (Map<String, Object> fileData : dto.getFiles()) {
+                SubmissionFile file = new SubmissionFile();
+                file.setFileName((String) fileData.get("name"));
+                file.setFileType((String) fileData.get("type"));
+                file.setMimeType((String) fileData.get("mimeType"));
+                file.setFileContent((String) fileData.get("content"));
+                file.setFileSize(((Number) fileData.get("size")).longValue());
+                file.setSubmission(saved);
+                file.setUploadedAtIfNew(); // Set timestamp for MongoDB
+                submissionFileRepository.save(file);
+            }
+        }
+        
+        return convertToDTO(saved);
+    }
+
+    public List<CodeSubmissionDTO> getAllSubmissions() {
+        return codeSubmissionRepository.findAll().stream()
+                .map(this::convertToDTO)
+                .collect(Collectors.toList());
+    }
+
+    public List<CodeSubmissionDTO> getAllSubmissionsSorted(String sortBy) {
+        List<CodeSubmission> submissions;
+        
+        if ("amount".equalsIgnoreCase(sortBy) || "reward".equalsIgnoreCase(sortBy)) {
+            // Sort by reward amount (descending - highest first)
+            submissions = codeSubmissionRepository.findAll().stream()
+                    .sorted((a, b) -> {
+                        Double amountA = a.getRewardAmount() != null ? a.getRewardAmount() : 0.0;
+                        Double amountB = b.getRewardAmount() != null ? b.getRewardAmount() : 0.0;
+                        return amountB.compareTo(amountA); // Descending
+                    })
+                    .collect(Collectors.toList());
+        } else if ("date".equalsIgnoreCase(sortBy) || "latest".equalsIgnoreCase(sortBy)) {
+            // Sort by creation date (descending - latest first)
+            submissions = codeSubmissionRepository.findAll().stream()
+                    .sorted((a, b) -> {
+                        if (a.getCreatedAt() == null && b.getCreatedAt() == null) return 0;
+                        if (a.getCreatedAt() == null) return 1;
+                        if (b.getCreatedAt() == null) return -1;
+                        return b.getCreatedAt().compareTo(a.getCreatedAt()); // Descending
+                    })
+                    .collect(Collectors.toList());
+        } else {
+            // Default: no sorting
+            submissions = codeSubmissionRepository.findAll();
+        }
+        
+        return submissions.stream()
+                .map(this::convertToDTO)
+                .collect(Collectors.toList());
+    }
+
+    public List<CodeSubmissionDTO> getSubmissionsByCompany(String email) {
+        User company = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        return codeSubmissionRepository.findByCompany(company).stream()
+                .map(this::convertToDTO)
+                .collect(Collectors.toList());
+    }
+
+    public List<CodeSubmissionDTO> getOpenSubmissions() {
+        return codeSubmissionRepository.findByStatus("OPEN").stream()
+                .map(this::convertToDTO)
+                .collect(Collectors.toList());
+    }
+
+    public List<CodeSubmissionDTO> getOpenSubmissionsSorted(String sortBy) {
+        List<CodeSubmission> submissions = codeSubmissionRepository.findByStatus("OPEN");
+        
+        if ("amount".equalsIgnoreCase(sortBy) || "reward".equalsIgnoreCase(sortBy)) {
+            // Sort by reward amount (descending - highest first)
+            submissions = submissions.stream()
+                    .sorted((a, b) -> {
+                        Double amountA = a.getRewardAmount() != null ? a.getRewardAmount() : 0.0;
+                        Double amountB = b.getRewardAmount() != null ? b.getRewardAmount() : 0.0;
+                        return amountB.compareTo(amountA); // Descending
+                    })
+                    .collect(Collectors.toList());
+        } else if ("date".equalsIgnoreCase(sortBy) || "latest".equalsIgnoreCase(sortBy)) {
+            // Sort by creation date (descending - latest first)
+            submissions = submissions.stream()
+                    .sorted((a, b) -> {
+                        if (a.getCreatedAt() == null && b.getCreatedAt() == null) return 0;
+                        if (a.getCreatedAt() == null) return 1;
+                        if (b.getCreatedAt() == null) return -1;
+                        return b.getCreatedAt().compareTo(a.getCreatedAt()); // Descending
+                    })
+                    .collect(Collectors.toList());
+        }
+        
+        return submissions.stream()
+                .map(this::convertToDTO)
+                .collect(Collectors.toList());
+    }
+
+    public CodeSubmissionDTO updateSubmissionStatusOnly(String id, String status, String email) {
+        User company = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        CodeSubmission submission = codeSubmissionRepository.findByIdAndCompany(id, company)
+                .orElseThrow(() -> new RuntimeException("Submission not found or unauthorized"));
+
+        submission.setStatus(status);
+        submission.updateTimestamp(); // Update timestamp for MongoDB
+        CodeSubmission updated = codeSubmissionRepository.save(submission);
+        return convertToDTO(updated);
+    }
+
+    public CodeSubmissionDTO getSubmissionById(String id) {
+        CodeSubmission submission = codeSubmissionRepository.findById(id)
+                .orElseThrow(() -> new RuntimeException("Submission not found"));
+        return convertToDTO(submission);
+    }
+
+    public CodeSubmissionDTO updateSubmission(String id, CodeSubmissionDTO dto, String email) {
+        User company = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        CodeSubmission submission = codeSubmissionRepository.findByIdAndCompany(id, company)
+                .orElseThrow(() -> new RuntimeException("Submission not found or unauthorized"));
+
+        submission.setTitle(dto.getTitle());
+        submission.setDescription(dto.getDescription());
+        submission.setFileName(dto.getFileName());
+        submission.setCodeContent(dto.getCodeContent());
+        submission.setRewardAmount(dto.getRewardAmount());
+        submission.setStatus(dto.getStatus());
+        submission.updateTimestamp(); // Update timestamp for MongoDB
+
+        CodeSubmission updated = codeSubmissionRepository.save(submission);
+        return convertToDTO(updated);
+    }
+
+    public void deleteSubmission(String id, String email) {
+        User company = userRepository.findByEmail(email)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        CodeSubmission submission = codeSubmissionRepository.findByIdAndCompany(id, company)
+                .orElseThrow(() -> new RuntimeException("Submission not found or unauthorized"));
+
+        codeSubmissionRepository.delete(submission);
+    }
+
+    private CodeSubmissionDTO convertToDTO(CodeSubmission submission) {
+        CodeSubmissionDTO dto = new CodeSubmissionDTO();
+        dto.setId(submission.getId());
+        dto.setTitle(submission.getTitle());
+        dto.setDescription(submission.getDescription());
+        dto.setFileName(submission.getFileName());
+        dto.setCodeContent(submission.getCodeContent());
+        dto.setStatus(submission.getStatus());
+        dto.setRewardAmount(submission.getRewardAmount());
+        dto.setWebsite(submission.getWebsite());
+        dto.setCreatedAt(submission.getCreatedAt().format(formatter));
+        dto.setCompanyName(submission.getCompany().getCompanyName() != null ? 
+                          submission.getCompany().getCompanyName() : submission.getCompany().getUsername());
+        dto.setCompanyId(submission.getCompany().getId());
+        
+        // Load associated files
+        List<SubmissionFile> files = submissionFileRepository.findBySubmission(submission);
+        List<Map<String, Object>> fileList = new ArrayList<>();
+        for (SubmissionFile file : files) {
+            Map<String, Object> fileMap = new HashMap<>();
+            fileMap.put("id", file.getId());
+            fileMap.put("name", file.getFileName());
+            fileMap.put("type", file.getFileType());
+            fileMap.put("mimeType", file.getMimeType());
+            fileMap.put("size", file.getFileSize());
+            fileMap.put("content", file.getFileContent());
+            fileList.add(fileMap);
+        }
+        dto.setFiles(fileList);
+        
+        return dto;
+    }
+}
+
