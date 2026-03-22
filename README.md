@@ -1,238 +1,277 @@
-# BugSecure Platform
+# 🚀 BugSecure - Bug Bounty & Code Testing Platform
 
-A comprehensive bug bounty and code testing platform where companies can upload their code for security testing, and researchers can test code, report bugs, and earn rewards.
+BugSecure is a **full-stack bug bounty platform** that connects **companies** with **security researchers**.
+Companies can upload their code for testing, and researchers can find bugs and earn rewards based on severity.
 
-## Features
+---
 
-### For Companies
-- Upload code files for security testing
-- Set reward amounts for bug discoveries
-- View and manage bug reports
-- Approve/reject bug reports
-- Close submissions when testing is complete
+## 🌟 Features
 
-### For Researchers/Users
-- Browse open code submissions
-- Submit detailed bug reports
-- Track reward status
-- View submission history
+### 🏢 For Companies
 
-### For Administrators
-- Manage all users, submissions, and bug reports
-- View platform statistics
-- Monitor system activity
+* Upload code for security testing
+* Set reward amounts
+* Manage bug reports
+* Approve / reject vulnerabilities
+* Close submissions
 
-## Technology Stack
+### 👨‍💻 For Researchers
 
-### Backend
-- **Spring Boot 3.5.7** - Java backend framework
-- **Spring Security** - Authentication and authorization
-- **JWT** - Token-based authentication
-- **MySQL** - Database
-- **JPA/Hibernate** - ORM
+* Browse available projects
+* Submit detailed bug reports
+* Track rewards
+* View submission history
 
-### Frontend
-- **React 19** - UI framework
-- **React Router** - Routing
-- **Tailwind CSS** - Styling
-- **Axios** - HTTP client
+### 🛡️ For Admins
 
-## Prerequisites
+* Manage users, submissions, reports
+* Monitor platform activity
+* View analytics and stats
 
-- Java 17 or higher
-- Node.js 14 or higher
-- MySQL 8.0 or higher
-- Maven 3.6 or higher
+---
 
-## Database Setup
+## 🧠 Key Highlights
 
-1. Create MySQL database:
-```sql
-CREATE DATABASE bugsecure_db;
-```
+* 🔐 JWT Authentication & Authorization
+* 👥 Role-Based Access (USER / COMPANY / ADMIN)
+* 💰 Reward Calculation System
+* 📂 Code Submission & Bug Tracking
+* ⚡ REST APIs with secure endpoints
+* 📱 Mobile-accessible frontend
 
-2. Update database credentials in `backend/src/main/resources/application.properties`:
-```properties
-spring.datasource.url=jdbc:mysql://localhost:3306/bugsecure_db?useSSL=false&serverTimezone=UTC
-spring.datasource.username=root
-spring.datasource.password=Goutam@123
-```
+---
 
-3. The application will automatically create tables on first run (using `spring.jpa.hibernate.ddl-auto=update`)
+## 🏗️ Tech Stack
 
-## Backend Setup
+### 🔧 Backend
 
-1. Navigate to backend directory:
-```bash
-cd backend
-```
+* Spring Boot 3
+* Spring Security
+* JWT Authentication
+* MongoDB
+* JPA / Hibernate
+* Maven
 
-2. Build the project:
-```bash
-mvn clean install
-```
+### 🎨 Frontend
 
-3. Run the application:
-```bash
-mvn spring-boot:run
-```
+* React 19
+* React Router
+* Tailwind CSS
+* Axios
+* Framer Motion
 
-The backend will start on `http://localhost:8080`
+---
 
-## Frontend Setup
-
-1. Navigate to frontend directory:
-```bash
-cd frontend
-```
-
-2. Install dependencies:
-```bash
-npm install
-```
-
-3. Start the development server:
-```bash
-npm start
-```
-
-The frontend will start on `http://localhost:3000`
-
-## User Roles
-
-### USER (Researcher)
-- Can browse open submissions
-- Can submit bug reports
-- Can view their own bug reports and rewards
-
-### COMPANY
-- Can create code submissions
-- Can view bug reports for their submissions
-- Can approve/reject bug reports
-- Can close submissions
-
-### ADMIN
-- Full access to all features
-- Can manage users
-- Can view all submissions and bug reports
-- Can view platform statistics
-
-## API Endpoints
-
-### Authentication
-- `POST /api/auth/login` - User login
-- `POST /api/users/register` - User registration
-
-### Submissions
-- `GET /api/submissions` - Get all submissions
-- `GET /api/submissions/my-submissions` - Get company's submissions
-- `GET /api/submissions/{id}` - Get submission by ID
-- `POST /api/submissions` - Create new submission (COMPANY only)
-- `PUT /api/submissions/{id}` - Update submission (COMPANY only)
-- `DELETE /api/submissions/{id}` - Delete submission (COMPANY only)
-
-### Bug Reports
-- `GET /api/bug-reports` - Get all bug reports
-- `GET /api/bug-reports/my-reports` - Get user's bug reports
-- `GET /api/bug-reports/submission/{submissionId}` - Get bug reports for submission
-- `GET /api/bug-reports/{id}` - Get bug report by ID
-- `POST /api/bug-reports` - Create new bug report (USER only)
-- `PUT /api/bug-reports/{id}/status` - Update bug report status (COMPANY/ADMIN)
-
-### Admin
-- `GET /api/admin/users` - Get all users (ADMIN only)
-- `GET /api/admin/submissions` - Get all submissions (ADMIN only)
-- `GET /api/admin/bug-reports` - Get all bug reports (ADMIN only)
-- `GET /api/admin/stats` - Get platform statistics (ADMIN only)
-
-## Default Configuration
-
-- Backend Port: 8080
-- Frontend Port: 3000
-- Database: bugsecure_db
-- JWT Secret: mysupersecretkey-must-be-very-long-and-random-12345
-
-## Security Features
-
-- JWT-based authentication
-- Password encryption using BCrypt
-- Role-based access control (RBAC)
-- CORS configuration
-- Secure API endpoints
-
-## Project Structure
+## 📁 Project Structure
 
 ```
 BugSecure/
+│
 ├── backend/
+│   ├── src/main/java/com/bugsecure/backend/
+│   │   ├── config/        # Security & JWT config
+│   │   ├── controller/    # REST APIs
+│   │   ├── dto/           # Data Transfer Objects
+│   │   ├── model/         # Entities
+│   │   ├── repository/    # DB Layer
+│   │   └── service/       # Business Logic
+│   └── application.properties
+│
+├── frontend/
 │   ├── src/
-│   │   └── main/
-│   │       ├── java/
-│   │       │   └── com/bugsecure/backend/
-│   │       │       ├── config/          # Security and JWT configuration
-│   │       │       ├── controller/      # REST controllers
-│   │       │       ├── dto/             # Data Transfer Objects
-│   │       │       ├── model/           # Entity models
-│   │       │       ├── repository/      # Data access layer
-│   │       │       └── service/         # Business logic
-│   │       └── resources/
-│   │           └── application.properties
-│   └── pom.xml
-└── frontend/
-    ├── src/
-    │   ├── components/     # React components
-    │   ├── pages/          # Page components
-    │   ├── services/       # API services
-    │   └── App.js
-    └── package.json
+│   │   ├── components/
+│   │   ├── pages/
+│   │   ├── services/
+│   │   └── App.js
+│   └── package.json
+│
+├── README.md
+├── PROJECT_SUMMARY.md
+├── QUICK_START_MONGODB.md
+└── CONNECT_PHONE_SIMPLE.md
 ```
 
-## Usage
+---
 
-1. **Register a new account** - Choose your role (USER, COMPANY, or ADMIN)
-2. **Login** - Use your credentials to access the platform
-3. **For Companies**: Create code submissions and manage bug reports
-4. **For Researchers**: Browse submissions and submit bug reports
-5. **For Admins**: Monitor and manage the entire platform
+## ⚙️ Installation & Setup
 
-## Reward System
+### 📌 Prerequisites
 
-- Rewards are set by companies when creating submissions
-- Bug report rewards are calculated based on severity:
-  - CRITICAL: 100% of base reward
-  - HIGH: 75% of base reward
-  - MEDIUM: 50% of base reward
-  - LOW: 25% of base reward
-- Rewards are awarded when bug reports are approved by the company
+* Java 17+
+* Node.js
+* MongoDB
+* Maven
 
-## Contributing
+---
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+## 🚀 Run the Project
 
-## License
+### 🔹 1. Start MongoDB
 
-This project is licensed under the MIT License.
+Make sure MongoDB is running
 
-## Support
+---
 
-For issues and questions, please open an issue on the GitHub repository.
+### 🔹 2. Run Backend
 
-## Author
+```bash
+cd backend
+mvn clean install
+./mvnw spring-boot:run
+```
 
-BugSecure Development Team
+Backend runs on:
+👉 http://localhost:8080
 
+---
 
+### 🔹 3. Run Frontend
 
+```bash
+cd frontend
+npm install
+npm start
+```
 
+Frontend runs on:
+👉 http://localhost:3000
 
+---
 
+## 📱 Access from Mobile
 
+Use your local IP:
 
+```
+http://YOUR-IP:3000
+```
 
+Example:
+`http://192.168.1.174:3000`
 
+---
 
+## 🔐 Authentication Flow
 
+1. User registers
+2. Login → JWT Token generated
+3. Token used in API requests
+4. Access based on role
 
+---
+
+## 🧾 API Overview
+
+### 🔑 Auth
+
+* POST `/api/auth/login`
+* POST `/api/users/register`
+
+### 📦 Submissions
+
+* GET `/api/submissions`
+* POST `/api/submissions`
+* PUT `/api/submissions/{id}`
+
+### 🐞 Bug Reports
+
+* POST `/api/bug-reports`
+* GET `/api/bug-reports/my-reports`
+* PUT `/api/bug-reports/{id}/status`
+
+### 🛡️ Admin
+
+* GET `/api/admin/users`
+* GET `/api/admin/stats`
+
+---
+
+## 💰 Reward System
+
+| Severity | Reward |
+| -------- | ------ |
+| CRITICAL | 100%   |
+| HIGH     | 75%    |
+| MEDIUM   | 50%    |
+| LOW      | 25%    |
+
+---
+
+## 🗄️ Database Collections
+
+* users
+* code_submissions
+* bug_reports
+* payments
+* submission_files
+
+---
+
+## 🧪 How to Test
+
+1. Register as COMPANY
+2. Create submission
+3. Register as USER
+4. Submit bug report
+5. Approve from company dashboard
+6. Check reward calculation
+
+---
+
+## ⚠️ Troubleshooting
+
+* MongoDB not running → start service
+* Port issue → check 8080 / 3000
+* API not connecting → check `.env`
+* Mobile not loading → check IP & firewall
+
+---
+
+## 📌 Useful Commands
+
+```bash
+git status
+git add .
+git commit -m "update project"
+git push origin main
+```
+
+---
+
+## 🚀 Future Enhancements
+
+* Payment integration 💳
+* Email notifications 📧
+* 2FA Authentication 🔐
+* Docker support 🐳
+* CI/CD pipeline ⚙️
+* Advanced analytics 📊
+
+---
+
+## 🤝 Contributing
+
+1. Fork repo
+2. Create branch
+3. Commit changes
+4. Push & create PR
+
+---
+
+## 📜 License
+
+MIT License
+
+---
+
+## 👨‍💻 Author
+
+**Goutam Patel**
+
+---
+
+## ⭐ Support
+
+If you like this project, give it a ⭐ on GitHub!
+
+---
