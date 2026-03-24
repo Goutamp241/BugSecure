@@ -21,6 +21,10 @@ public class TestExecution {
     private String scriptContent; // The script or command content
     private String fileName; // If file was uploaded
     private String fileType; // JS, PYTHON, etc.
+    // Secure storage for uploaded script/file bytes. New executions should prefer this.
+    private String scriptStorageKey;
+    private String scriptMimeType;
+    private Long scriptSizeBytes;
     private String status = "PENDING"; // PENDING, RUNNING, COMPLETED, FAILED
     private String output; // Test execution output
     private String errorLog; // Error logs if any
@@ -80,6 +84,30 @@ public class TestExecution {
 
     public void setScriptContent(String scriptContent) {
         this.scriptContent = scriptContent;
+    }
+
+    public String getScriptStorageKey() {
+        return scriptStorageKey;
+    }
+
+    public void setScriptStorageKey(String scriptStorageKey) {
+        this.scriptStorageKey = scriptStorageKey;
+    }
+
+    public String getScriptMimeType() {
+        return scriptMimeType;
+    }
+
+    public void setScriptMimeType(String scriptMimeType) {
+        this.scriptMimeType = scriptMimeType;
+    }
+
+    public Long getScriptSizeBytes() {
+        return scriptSizeBytes;
+    }
+
+    public void setScriptSizeBytes(Long scriptSizeBytes) {
+        this.scriptSizeBytes = scriptSizeBytes;
     }
 
     public String getFileName() {

@@ -55,13 +55,33 @@ public class BugReportController {
     }
 
     @GetMapping("/my-reports")
-    public ResponseEntity<Map<String, Object>> getMyBugReports(Authentication authentication) {
+    public ResponseEntity<Map<String, Object>> getMyBugReports(
+            Authentication authentication,
+            @RequestParam(name = "q", required = false) String q,
+            @RequestParam(name = "status", required = false) String status,
+            @RequestParam(name = "severity", required = false) String severity,
+            @RequestParam(name = "page", required = false, defaultValue = "0") Integer page,
+            @RequestParam(name = "pageSize", required = false, defaultValue = "50") Integer pageSize
+    ) {
         Map<String, Object> response = new HashMap<>();
         try {
             UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-            List<BugReportDTO> bugReports = bugReportService.getBugReportsByReporter(userDetails.getUsername());
+            BugReportService.PaginatedResult<BugReportDTO> result = bugReportService.searchBugReportsForReporter(
+                    userDetails.getUsername(),
+                    q,
+                    status,
+                    severity,
+                    page == null ? 0 : page,
+                    pageSize == null ? 50 : pageSize
+            );
             response.put("success", true);
-            response.put("data", bugReports);
+            response.put("data", result.getItems());
+            Map<String, Object> meta = new HashMap<>();
+            meta.put("total", result.getTotal());
+            meta.put("page", result.getPage());
+            meta.put("pageSize", result.getPageSize());
+            meta.put("totalPages", result.getTotalPages());
+            response.put("meta", meta);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             response.put("success", false);
@@ -71,10 +91,28 @@ public class BugReportController {
     }
 
     @GetMapping("/submission/{submissionId}")
-    public ResponseEntity<Map<String, Object>> getBugReportsBySubmission(@PathVariable String submissionId) {
+    public ResponseEntity<Map<String, Object>> getBugReportsBySubmission(
+            @PathVariable String submissionId,
+            Authentication authentication) {
         Map<String, Object> response = new HashMap<>();
         try {
-            List<BugReportDTO> bugReports = bugReportService.getBugReportsBySubmission(submissionId);
+            UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+            boolean isCompany = userDetails.getAuthorities().stream()
+                    .anyMatch(a -> "ROLE_COMPANY".equals(a.getAuthority()));
+            boolean isAdmin = userDetails.getAuthorities().stream()
+                    .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+
+            if (!isCompany && !isAdmin) {
+                throw new RuntimeException("Unauthorized to view this submission");
+            }
+
+            String viewerRole = isCompany ? "COMPANY" : "ADMIN";
+
+            List<BugReportDTO> bugReports = bugReportService.getBugReportsBySubmission(
+                    submissionId,
+                    userDetails.getUsername(),
+                    viewerRole
+            );
             response.put("success", true);
             response.put("data", bugReports);
             return ResponseEntity.ok(response);

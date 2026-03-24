@@ -20,11 +20,14 @@ public class AnalyticsController {
     private AnalyticsService analyticsService;
 
     @GetMapping("/admin")
-    public ResponseEntity<Map<String, Object>> getAdminAnalytics(Authentication authentication) {
+    public ResponseEntity<Map<String, Object>> getAdminAnalytics(
+            Authentication authentication,
+            @RequestParam(name = "range", required = false, defaultValue = "monthly") String range
+    ) {
         Map<String, Object> response = new HashMap<>();
         try {
             // Role verification is handled by SecurityConfig
-            AnalyticsDTO analytics = analyticsService.getAdminAnalytics();
+            AnalyticsDTO analytics = analyticsService.getAdminAnalytics(range);
             response.put("success", true);
             response.put("data", analytics);
             return ResponseEntity.ok(response);
@@ -36,11 +39,14 @@ public class AnalyticsController {
     }
 
     @GetMapping("/company")
-    public ResponseEntity<Map<String, Object>> getCompanyAnalytics(Authentication authentication) {
+    public ResponseEntity<Map<String, Object>> getCompanyAnalytics(
+            Authentication authentication,
+            @RequestParam(name = "range", required = false, defaultValue = "monthly") String range
+    ) {
         Map<String, Object> response = new HashMap<>();
         try {
             UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-            AnalyticsDTO analytics = analyticsService.getCompanyAnalytics(userDetails.getUsername());
+            AnalyticsDTO analytics = analyticsService.getCompanyAnalytics(userDetails.getUsername(), range);
             response.put("success", true);
             response.put("data", analytics);
             return ResponseEntity.ok(response);
@@ -52,11 +58,14 @@ public class AnalyticsController {
     }
 
     @GetMapping("/researcher")
-    public ResponseEntity<Map<String, Object>> getResearcherAnalytics(Authentication authentication) {
+    public ResponseEntity<Map<String, Object>> getResearcherAnalytics(
+            Authentication authentication,
+            @RequestParam(name = "range", required = false, defaultValue = "monthly") String range
+    ) {
         Map<String, Object> response = new HashMap<>();
         try {
             UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-            AnalyticsDTO analytics = analyticsService.getResearcherAnalytics(userDetails.getUsername());
+            AnalyticsDTO analytics = analyticsService.getResearcherAnalytics(userDetails.getUsername(), range);
             response.put("success", true);
             response.put("data", analytics);
             return ResponseEntity.ok(response);

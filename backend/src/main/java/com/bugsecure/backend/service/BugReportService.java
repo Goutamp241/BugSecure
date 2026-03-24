@@ -12,7 +12,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.format.DateTimeFormatter;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 @Service
@@ -30,7 +33,13 @@ public class BugReportService {
     @Autowired
     private WalletService walletService;
 
+    @Autowired
+    private NotificationService notificationService;
+
     private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+    // Platform takes 5% commission from the gross bounty.
+    private static final double PLATFORM_COMMISSION_RATE = 0.05;
 
     public BugReportDTO createBugReport(BugReportDTO dto, String email) {
         User reporter = userRepository.findByEmail(email)
@@ -61,7 +70,7 @@ public class BugReportService {
 
     public List<BugReportDTO> getAllBugReports() {
         return bugReportRepository.findAll().stream()
-                .map(this::convertToDTO)
+                .map(br -> convertToDTOForViewer(br, "ADMIN"))
                 .collect(Collectors.toList());
     }
 
@@ -70,7 +79,7 @@ public class BugReportService {
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         return bugReportRepository.findByReporter(reporter).stream()
-                .map(this::convertToDTO)
+                .map(br -> convertToDTOForViewer(br, "USER"))
                 .collect(Collectors.toList());
     }
 
@@ -79,14 +88,35 @@ public class BugReportService {
                 .orElseThrow(() -> new RuntimeException("Submission not found"));
 
         return bugReportRepository.findByCodeSubmission(submission).stream()
-                .map(this::convertToDTO)
+                .map(br -> convertToDTOForViewer(br, "COMPANY"))
+                .collect(Collectors.toList());
+    }
+
+    public List<BugReportDTO> getBugReportsBySubmission(String submissionId, String viewerEmail, String viewerRole) {
+        CodeSubmission submission;
+
+        if ("COMPANY".equals(viewerRole)) {
+            User company = userRepository.findByEmail(viewerEmail)
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+            submission = codeSubmissionRepository.findByIdAndCompany(submissionId, company)
+                    .orElseThrow(() -> new RuntimeException("Submission not found or unauthorized"));
+        } else if ("ADMIN".equals(viewerRole)) {
+            submission = codeSubmissionRepository.findById(submissionId)
+                    .orElseThrow(() -> new RuntimeException("Submission not found"));
+        } else {
+            throw new RuntimeException("Unauthorized to view this submission");
+        }
+
+        return bugReportRepository.findByCodeSubmission(submission).stream()
+                .map(br -> convertToDTOForViewer(br, viewerRole))
                 .collect(Collectors.toList());
     }
 
     public BugReportDTO getBugReportById(String id) {
         BugReport bugReport = bugReportRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Bug report not found"));
-        return convertToDTO(bugReport);
+        // Default to net view; endpoints should pass viewer role if needed.
+        return convertToDTOForViewer(bugReport, "USER");
     }
 
     public BugReportDTO updateBugReportStatus(String id, String status, String email) {
@@ -106,42 +136,86 @@ public class BugReportService {
         bugReport.setStatus(status);
         
         // If approved, set reward amount based on severity
-        if ("APPROVED".equals(status) && bugReport.getRewardAmount() == null) {
-            Double baseReward = bugReport.getCodeSubmission().getRewardAmount();
-            double multiplier = getSeverityMultiplier(bugReport.getSeverity());
-            bugReport.setRewardAmount(baseReward * multiplier);
+        if ("APPROVED".equals(status)) {
+            // Idempotency guard: wallet split must only happen once per bug report.
+            if (!bugReport.getWalletSplitCompleted()) {
+                Double baseReward = bugReport.getCodeSubmission().getRewardAmount();
+                double multiplier = getSeverityMultiplier(bugReport.getSeverity());
+
+                // Business rule:
+                // - Gross bounty paid by company depends on severity.
+                // - Platform commission is always 5% of the *base* bounty (company rewardAmount),
+                //   independent of severity.
+                // Example: base=300, severity=LOW(mult=0.25) => gross=75, commission=15, net=60.
+                Double grossBountyUSD = (baseReward != null ? baseReward : 0.0) * multiplier;
+                Double commissionUSD = (baseReward != null ? baseReward : 0.0) * PLATFORM_COMMISSION_RATE;
+                // Researcher net = gross - commission
+                Double netToResearcherUSD = grossBountyUSD - commissionUSD;
+
+                bugReport.setBountyAmountUSD(grossBountyUSD);
+                bugReport.setPlatformCommissionAmountUSD(commissionUSD);
+                bugReport.setResearcherNetAmountUSD(netToResearcherUSD);
+
+                // Keep existing field for backwards compatibility (net for researcher views).
+                bugReport.setRewardAmount(netToResearcherUSD);
+            }
         }
         
         bugReport.updateTimestamp(); // Update timestamp for MongoDB
 
         BugReport updated = bugReportRepository.save(bugReport);
-        
-        // If status changed to APPROVED, automatically transfer reward from company wallet to researcher
-        if ("APPROVED".equals(status) && !"APPROVED".equals(oldStatus)) {
-            try {
-                User company = bugReport.getCodeSubmission().getCompany();
-                User researcher = bugReport.getReporter();
-                Double rewardAmount = updated.getRewardAmount() != null ? 
-                    updated.getRewardAmount() : 
-                    bugReport.getCodeSubmission().getRewardAmount();
 
-                if (rewardAmount != null && rewardAmount > 0) {
-                    String description = String.format("Bug bounty reward for: %s", updated.getTitle());
-                    walletService.transferFromCompanyToResearcher(
-                        company.getId(),
-                        researcher.getId(),
-                        rewardAmount,
-                        description
-                    );
-                }
-            } catch (Exception e) {
-                // Log error but don't fail the status update
-                System.err.println("Failed to transfer reward to researcher wallet: " + e.getMessage());
-                // Optionally, you could set a flag or log this for manual processing
+        // Notify reporter + company on actual status change
+        if (oldStatus != null && status != null && !oldStatus.equals(status)) {
+            try {
+                User reporter = updated.getReporter();
+                User company = updated.getCodeSubmission() != null ? updated.getCodeSubmission().getCompany() : null;
+
+                String title = "Bug report update";
+                String msg = String.format("'%s' is now %s.", updated.getTitle(), updated.getStatus());
+
+                notificationService.createBugStatusNotification(reporter, title, msg, updated.getId());
+                notificationService.createBugStatusNotification(company, title, msg, updated.getId());
+            } catch (Exception ignored) {
+                // Notifications should never block the core status update.
             }
         }
-        
-        return convertToDTO(updated);
+
+        // If status transitioned to APPROVED, perform the 3-way split:
+        // company debit (gross), researcher credit (net), platform commission (5%)
+        if ("APPROVED".equals(status) && !"APPROVED".equals(oldStatus) && !updated.getWalletSplitCompleted()) {
+            try {
+                User company = updated.getCodeSubmission().getCompany();
+                User researcher = updated.getReporter();
+
+                Double grossBountyUSD = updated.getBountyAmountUSD() != null ? updated.getBountyAmountUSD() : updated.getRewardAmount();
+                Double commissionUSD = updated.getPlatformCommissionAmountUSD() != null ? updated.getPlatformCommissionAmountUSD() : 0.0;
+                Double netToResearcherUSD = updated.getResearcherNetAmountUSD() != null ? updated.getResearcherNetAmountUSD() : updated.getRewardAmount();
+
+                if (grossBountyUSD != null && grossBountyUSD > 0 && netToResearcherUSD != null && netToResearcherUSD >= 0) {
+                    walletService.transferBountyWithCommissionToResearcher(
+                            company.getId(),
+                            researcher.getId(),
+                            grossBountyUSD,
+                            netToResearcherUSD,
+                            commissionUSD,
+                            null, // use configured platform admin email
+                            String.format("Bug bounty reward (net) for: %s", updated.getTitle()),
+                            String.format("Bounty paid for: %s", updated.getTitle()),
+                            String.format("BugSecure commission for: %s", updated.getTitle())
+                    );
+
+                    // Mark split as completed after successful transfer.
+                    updated.setWalletSplitCompleted(true);
+                    bugReportRepository.save(updated);
+                }
+            } catch (Exception e) {
+                // Do not fail the status update if split transfer fails.
+                System.err.println("Failed to perform bounty split: " + e.getMessage());
+            }
+        }
+
+        return convertToDTOForViewer(updated, user.getRole());
     }
 
     private double getSeverityMultiplier(String severity) {
@@ -154,7 +228,7 @@ public class BugReportService {
         }
     }
 
-    private BugReportDTO convertToDTO(BugReport bugReport) {
+    private BugReportDTO convertToDTOForViewer(BugReport bugReport, String viewerRole) {
         BugReportDTO dto = new BugReportDTO();
         dto.setId(bugReport.getId());
         dto.setTitle(bugReport.getTitle());
@@ -169,8 +243,144 @@ public class BugReportService {
         dto.setSubmissionTitle(bugReport.getCodeSubmission().getTitle());
         dto.setReporterId(bugReport.getReporter().getId());
         dto.setReporterName(bugReport.getReporter().getUsername());
-        dto.setRewardAmount(bugReport.getRewardAmount());
+        // Non-admins must not see commission breakdown.
+        // - COMPANY sees the gross bounty (company is debited this amount)
+        // - USER (researcher) sees the net amount (95% credit)
+        // - ADMIN defaults to gross bounty (commission details are available only via admin endpoints)
+        if ("COMPANY".equals(viewerRole)) {
+            dto.setRewardAmount(bugReport.getBountyAmountUSD() != null ? bugReport.getBountyAmountUSD() : bugReport.getRewardAmount());
+        } else {
+            dto.setRewardAmount(bugReport.getResearcherNetAmountUSD() != null ? bugReport.getResearcherNetAmountUSD() : bugReport.getRewardAmount());
+        }
         return dto;
+    }
+
+    private BugReportDTO convertToDTO(BugReport bugReport) {
+        // Backwards compatibility: default to net.
+        return convertToDTOForViewer(bugReport, "USER");
+    }
+
+    public PaginatedResult<BugReportDTO> searchBugReportsForAdmin(
+            String q,
+            String status,
+            String severity,
+            int page,
+            int pageSize
+    ) {
+        String safeQ = q == null ? "" : q.trim().toLowerCase();
+        String safeStatus = status == null ? null : status.trim().toUpperCase();
+        String safeSeverity = severity == null ? null : severity.trim().toUpperCase();
+
+        int safePage = Math.max(0, page);
+        int safePageSize = Math.min(100, Math.max(1, pageSize));
+
+        List<BugReport> all = bugReportRepository.findAll();
+
+        List<BugReport> filtered = all.stream()
+                .filter(br -> {
+                    if (safeStatus != null && !safeStatus.equals(br.getStatus())) return false;
+                    if (safeSeverity != null && !safeSeverity.equals(br.getSeverity())) return false;
+                    if (safeQ.isEmpty()) return true;
+                    return (br.getTitle() != null && br.getTitle().toLowerCase().contains(safeQ)) ||
+                            (br.getDescription() != null && br.getDescription().toLowerCase().contains(safeQ));
+                })
+                .sorted(Comparator.comparing(BugReport::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
+                .collect(Collectors.toList());
+
+        long total = filtered.size();
+        int fromIdx = safePage * safePageSize;
+        int toIdx = Math.min(filtered.size(), fromIdx + safePageSize);
+
+        if (fromIdx >= filtered.size()) {
+            return new PaginatedResult<>(List.of(), total, safePage, safePageSize);
+        }
+
+        List<BugReportDTO> items = filtered.subList(fromIdx, toIdx).stream()
+                .map(br -> convertToDTOForViewer(br, "ADMIN"))
+                .collect(Collectors.toList());
+
+        return new PaginatedResult<>(items, total, safePage, safePageSize);
+    }
+
+    public PaginatedResult<BugReportDTO> searchBugReportsForReporter(
+            String reporterEmail,
+            String q,
+            String status,
+            String severity,
+            int page,
+            int pageSize
+    ) {
+        User reporter = userRepository.findByEmail(reporterEmail)
+                .orElseThrow(() -> new RuntimeException("User not found"));
+
+        String safeQ = q == null ? "" : q.trim().toLowerCase();
+        String safeStatus = status == null ? null : status.trim().toUpperCase();
+        String safeSeverity = severity == null ? null : severity.trim().toUpperCase();
+
+        int safePage = Math.max(0, page);
+        int safePageSize = Math.min(100, Math.max(1, pageSize));
+
+        List<BugReport> all = bugReportRepository.findByReporter(reporter);
+
+        List<BugReport> filtered = all.stream()
+                .filter(br -> {
+                    if (safeStatus != null && !safeStatus.equals(br.getStatus())) return false;
+                    if (safeSeverity != null && !safeSeverity.equals(br.getSeverity())) return false;
+                    if (safeQ.isEmpty()) return true;
+                    return (br.getTitle() != null && br.getTitle().toLowerCase().contains(safeQ)) ||
+                            (br.getDescription() != null && br.getDescription().toLowerCase().contains(safeQ));
+                })
+                .sorted(Comparator.comparing(BugReport::getCreatedAt, Comparator.nullsLast(Comparator.reverseOrder())))
+                .collect(Collectors.toList());
+
+        long total = filtered.size();
+        int fromIdx = safePage * safePageSize;
+        int toIdx = Math.min(filtered.size(), fromIdx + safePageSize);
+
+        if (fromIdx >= filtered.size()) {
+            return new PaginatedResult<>(List.of(), total, safePage, safePageSize);
+        }
+
+        List<BugReportDTO> items = filtered.subList(fromIdx, toIdx).stream()
+                .map(br -> convertToDTOForViewer(br, "USER"))
+                .collect(Collectors.toList());
+
+        return new PaginatedResult<>(items, total, safePage, safePageSize);
+    }
+
+    public static class PaginatedResult<T> {
+        private List<T> items;
+        private long total;
+        private int page;
+        private int pageSize;
+
+        public PaginatedResult(List<T> items, long total, int page, int pageSize) {
+            this.items = items;
+            this.total = total;
+            this.page = page;
+            this.pageSize = pageSize;
+        }
+
+        public List<T> getItems() {
+            return items;
+        }
+
+        public long getTotal() {
+            return total;
+        }
+
+        public int getPage() {
+            return page;
+        }
+
+        public int getPageSize() {
+            return pageSize;
+        }
+
+        public int getTotalPages() {
+            if (pageSize == 0) return 0;
+            return (int) Math.ceil((double) total / (double) pageSize);
+        }
     }
 }
 

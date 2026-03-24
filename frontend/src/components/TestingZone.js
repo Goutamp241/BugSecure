@@ -44,13 +44,20 @@ const TestingZone = () => {
       const reader = new FileReader();
       reader.onload = (event) => {
         setScriptContent(event.target.result);
-        // Determine file type
-        const extension = file.name.split('.').pop().toLowerCase();
-        setTestType(extension === 'js' ? 'FILE_UPLOAD' : 
-                   extension === 'py' ? 'FILE_UPLOAD' : 
-                   'FILE_UPLOAD');
+        // Always treat uploads as FILE_UPLOAD; backend will decide whether it can simulate execution.
+        setTestType("FILE_UPLOAD");
       };
-      reader.readAsText(file);
+      // For text/code, read as text; for other documents, read as data URL.
+      const isTextLike =
+        (file.type && file.type.startsWith("text/")) ||
+        [".js", ".ts", ".jsx", ".tsx", ".py", ".txt", ".sh", ".c", ".cc", ".cpp", ".cs", ".go", ".java", ".rb", ".php"].some((ext) =>
+          file.name.toLowerCase().endsWith(ext)
+        );
+      if (isTextLike) {
+        reader.readAsText(file);
+      } else {
+        reader.readAsDataURL(file);
+      }
     }
   };
 

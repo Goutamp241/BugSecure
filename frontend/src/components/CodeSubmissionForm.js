@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import API from "../services/api";
 import EnhancedFileUpload from "./EnhancedFileUpload";
+import { convertUSDToINR } from "../utils/currency";
 
 const CodeSubmissionForm = ({ onSubmissionCreated }) => {
   const [formData, setFormData] = useState({
@@ -189,8 +190,8 @@ const CodeSubmissionForm = ({ onSubmissionCreated }) => {
           />
           {formData.rewardAmount && !isNaN(parseFloat(formData.rewardAmount)) && (
             <p className="text-gray-400 text-xs md:text-sm mt-2">
-              ≈ ₹{(parseFloat(formData.rewardAmount) * 83).toFixed(2)} INR
-              <span className="text-xs text-gray-500 ml-2">(Rate: 1 USD = ₹83 INR)</span>
+              ≈ ₹{convertUSDToINR(parseFloat(formData.rewardAmount)).toFixed(2)} INR
+              <span className="text-xs text-gray-500 ml-2">(Rate updated automatically)</span>
             </p>
           )}
         </div>

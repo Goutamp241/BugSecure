@@ -2,12 +2,16 @@ package com.bugsecure.backend.controller;
 
 import com.bugsecure.backend.model.User;
 import com.bugsecure.backend.repository.UserRepository;
+import com.bugsecure.backend.service.AccountDeletionService;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
 import java.util.Map;
+import org.springframework.http.ResponseEntity;
 
 @RestController
 @RequestMapping("/api/users")
@@ -19,6 +23,9 @@ public class UserController {
 
     @Autowired
     private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private AccountDeletionService accountDeletionService;
 
     @PostMapping("/register")
     public Map<String, Object> registerUser(@RequestBody Map<String, String> body) {
@@ -68,6 +75,31 @@ public class UserController {
             resp.put("message", "Registration failed: " + e.getMessage());
             resp.put("success", false);
             return resp;
+        }
+    }
+
+    @DeleteMapping("/me")
+    public ResponseEntity<Map<String, Object>> deleteMyAccount(Authentication authentication) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+            User me = userRepository.findByEmail(userDetails.getUsername())
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+
+            if ("ADMIN".equals(me.getRole())) {
+                response.put("success", false);
+                response.put("error", "Admin account deletion is not allowed via this endpoint");
+                return ResponseEntity.badRequest().body(response);
+            }
+
+            accountDeletionService.permanentlyDeleteUser(me.getId());
+            response.put("success", true);
+            response.put("message", "Account deleted successfully");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("error", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
         }
     }
 }

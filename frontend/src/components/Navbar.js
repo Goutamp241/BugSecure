@@ -28,6 +28,16 @@ const Navbar = () => {
               Home
             </Link>
           </li>
+          <li>
+            <Link to="/about" className={isActive("/about")}>
+              About Us
+            </Link>
+          </li>
+          <li>
+            <Link to="/contact" className={isActive("/contact")}>
+              Contact Us
+            </Link>
+          </li>
           {!localStorage.getItem("token") ? (
             <>
               <li>

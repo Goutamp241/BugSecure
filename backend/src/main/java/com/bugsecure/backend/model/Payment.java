@@ -12,6 +12,19 @@ public class Payment {
     private String id;
     private Double amountUSD;
     private Double amountINR;
+
+    // Gross bounty (company debited) in USD/INR.
+    private Double bountyAmountUSD;
+    private Double bountyAmountINR;
+
+    // Net amount credited to researcher (bounty minus commission) in USD/INR.
+    // For backwards compatibility, amountUSD/amountINR are treated as "researcher net" in this phase.
+    private Double researcherNetAmountUSD;
+    private Double researcherNetAmountINR;
+
+    // Platform commission amount for this payment (admin-only visibility).
+    private Double platformCommissionAmountUSD;
+    private Double platformCommissionAmountINR;
     private String status = "PENDING"; // PENDING, PROCESSING, COMPLETED, FAILED
     private String paymentMethod; // BANK_TRANSFER, UPI, PAYPAL, etc.
     private String transactionId;
@@ -78,6 +91,54 @@ public class Payment {
 
     public void setAmountINR(Double amountINR) {
         this.amountINR = amountINR;
+    }
+
+    public Double getBountyAmountUSD() {
+        return bountyAmountUSD;
+    }
+
+    public void setBountyAmountUSD(Double bountyAmountUSD) {
+        this.bountyAmountUSD = bountyAmountUSD;
+    }
+
+    public Double getBountyAmountINR() {
+        return bountyAmountINR;
+    }
+
+    public void setBountyAmountINR(Double bountyAmountINR) {
+        this.bountyAmountINR = bountyAmountINR;
+    }
+
+    public Double getResearcherNetAmountUSD() {
+        return researcherNetAmountUSD;
+    }
+
+    public void setResearcherNetAmountUSD(Double researcherNetAmountUSD) {
+        this.researcherNetAmountUSD = researcherNetAmountUSD;
+    }
+
+    public Double getResearcherNetAmountINR() {
+        return researcherNetAmountINR;
+    }
+
+    public void setResearcherNetAmountINR(Double researcherNetAmountINR) {
+        this.researcherNetAmountINR = researcherNetAmountINR;
+    }
+
+    public Double getPlatformCommissionAmountUSD() {
+        return platformCommissionAmountUSD;
+    }
+
+    public void setPlatformCommissionAmountUSD(Double platformCommissionAmountUSD) {
+        this.platformCommissionAmountUSD = platformCommissionAmountUSD;
+    }
+
+    public Double getPlatformCommissionAmountINR() {
+        return platformCommissionAmountINR;
+    }
+
+    public void setPlatformCommissionAmountINR(Double platformCommissionAmountINR) {
+        this.platformCommissionAmountINR = platformCommissionAmountINR;
     }
 
     public String getStatus() {

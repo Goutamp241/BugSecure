@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import API from "../services/api";
+import MemojiAvatarPicker from "../components/MemojiAvatarPicker";
 
 const ProfilePage = () => {
   const { id } = useParams();
@@ -8,6 +9,9 @@ const ProfilePage = () => {
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [avatarPickerOpen, setAvatarPickerOpen] = useState(false);
+  const [avatarSaving, setAvatarSaving] = useState(false);
   const [formData, setFormData] = useState({
     username: "",
     bio: "",
@@ -30,6 +34,54 @@ const ProfilePage = () => {
   useEffect(() => {
     fetchProfile();
   }, [id]);
+
+  const handleDeleteMyAccount = async () => {
+    if (deleteLoading) return;
+    if (!window.confirm("Permanently delete your account? This cannot be undone.")) {
+      return;
+    }
+
+    setDeleteLoading(true);
+    setError("");
+    try {
+      const res = await API.delete("/api/users/me");
+      if (res.data.success) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("user");
+        navigate("/login");
+      } else {
+        setError(res.data.error || "Failed to delete account");
+      }
+    } catch (e) {
+      setError(e.response?.data?.error || "Failed to delete account");
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleSaveAvatar = async (avatarDataUri) => {
+    if (avatarSaving) return;
+    setAvatarSaving(true);
+    setError("");
+    try {
+      const res = await API.put("/api/profile", { profileImage: avatarDataUri });
+      if (res.data.success) {
+        setProfile(res.data.data);
+        setFormData((prev) => ({
+          ...prev,
+          profileImage: res.data.data.profileImage,
+        }));
+        localStorage.setItem("user", JSON.stringify(res.data.data));
+        setAvatarPickerOpen(false);
+      } else {
+        setError(res.data.error || "Failed to save avatar");
+      }
+    } catch (e) {
+      setError(e.response?.data?.error || "Failed to save avatar");
+    } finally {
+      setAvatarSaving(false);
+    }
+  };
 
   const fetchProfile = async () => {
     try {
@@ -228,6 +280,22 @@ const ProfilePage = () => {
                   >
                     Change Password
                   </button>
+                  <button
+                    onClick={() => setAvatarPickerOpen(true)}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    disabled={avatarSaving}
+                  >
+                    {avatarSaving ? "Updating..." : "Choose Avatar"}
+                  </button>
+                  {profile.role !== "ADMIN" && (
+                    <button
+                      onClick={handleDeleteMyAccount}
+                      disabled={deleteLoading}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {deleteLoading ? "Deleting..." : "Delete My Account"}
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -235,6 +303,13 @@ const ProfilePage = () => {
 
           {error && (
             <div className="bg-red-600 text-white p-3 rounded mb-4">{error}</div>
+          )}
+
+          {avatarPickerOpen && isOwnProfile && (
+            <MemojiAvatarPicker
+              onCancel={() => setAvatarPickerOpen(false)}
+              onSave={handleSaveAvatar}
+            />
           )}
 
           {/* Profile Information */}

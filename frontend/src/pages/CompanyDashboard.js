@@ -6,6 +6,8 @@ import SubmissionList from "../components/SubmissionList";
 import AnalyticsCharts from "../components/AnalyticsCharts";
 import Wallet from "../components/Wallet";
 import Toast from "../components/Toast";
+import { convertUSDToINR } from "../utils/currency";
+import NotificationsWidget from "../components/NotificationsWidget";
 
 const CompanyDashboard = ({ user }) => {
   const [submissions, setSubmissions] = useState([]);
@@ -14,13 +16,27 @@ const CompanyDashboard = ({ user }) => {
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [analytics, setAnalytics] = useState(null);
+  const [analyticsRange, setAnalyticsRange] = useState("monthly");
   const [toast, setToast] = useState(null);
   const navigate = useNavigate();
 
+  const [attachmentsByReportId, setAttachmentsByReportId] = useState({});
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewTitle, setPreviewTitle] = useState("");
+  const [previewText, setPreviewText] = useState("");
+  const [previewBlobUrl, setPreviewBlobUrl] = useState(null);
+  const [previewMimeType, setPreviewMimeType] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
+
   useEffect(() => {
     fetchSubmissions();
-    fetchAnalytics();
   }, []);
+
+  useEffect(() => {
+    fetchAnalytics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyticsRange]);
 
   const fetchSubmissions = async () => {
     try {
@@ -47,9 +63,85 @@ const CompanyDashboard = ({ user }) => {
     }
   };
 
+  const loadAttachmentsForReport = async (reportId) => {
+    try {
+      const res = await API.get(`/api/bug-reports/${reportId}/attachments`);
+      if (res.data.success) {
+        setAttachmentsByReportId((prev) => ({ ...prev, [reportId]: res.data.data || [] }));
+      }
+    } catch (e) {
+      console.error("Failed to load attachments:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (!bugReports || bugReports.length === 0) return;
+    // Load attachments metadata for all visible bug reports.
+    bugReports.forEach((r) => {
+      loadAttachmentsForReport(r.id);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bugReports]);
+
+  const closePreview = () => {
+    setPreviewOpen(false);
+    setPreviewTitle("");
+    setPreviewText("");
+    setPreviewError("");
+    setPreviewLoading(false);
+    if (previewBlobUrl) {
+      URL.revokeObjectURL(previewBlobUrl);
+    }
+    setPreviewBlobUrl(null);
+    setPreviewMimeType("");
+  };
+
+  const openAttachmentPreview = async (reportId, attachment) => {
+    setPreviewOpen(true);
+    setPreviewLoading(true);
+    setPreviewError("");
+    setPreviewText("");
+    if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
+    setPreviewBlobUrl(null);
+    setPreviewMimeType("");
+    setPreviewTitle(attachment?.name || "Attachment Preview");
+
+    try {
+      const mimeType = attachment?.mimeType || "";
+      const treatAsText = mimeType.startsWith("text/") || attachment?.type === "CODE";
+
+      if (treatAsText) {
+        const res = await API.get(
+          `/api/bug-reports/${reportId}/attachments/${attachment.id}/preview`,
+          {
+            params: { limit: 60000 },
+            responseType: "text",
+          }
+        );
+        setPreviewText(res.data || "");
+      } else {
+        const res = await API.get(
+          `/api/bug-reports/${reportId}/attachments/${attachment.id}/preview`,
+          {
+            params: { limit: 60000 },
+            responseType: "blob",
+          }
+        );
+        const blob = res.data;
+        const url = URL.createObjectURL(blob);
+        setPreviewBlobUrl(url);
+        setPreviewMimeType(blob?.type || mimeType || "application/octet-stream");
+      }
+    } catch (e) {
+      setPreviewError(e.response?.data?.error || "Failed to preview attachment");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   const fetchAnalytics = async () => {
     try {
-      const res = await API.get("/api/analytics/company");
+      const res = await API.get(`/api/analytics/company?range=${analyticsRange}`);
       if (res.data.success) {
         setAnalytics(res.data.data);
       }
@@ -149,11 +241,18 @@ const CompanyDashboard = ({ user }) => {
           <Wallet />
         </div>
 
+        <NotificationsWidget limit={5} />
+
         {/* Analytics Charts */}
         {analytics && (
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-blue-400 mb-4">Analytics</h2>
-            <AnalyticsCharts analytics={analytics} userRole="COMPANY" />
+            <AnalyticsCharts
+              analytics={analytics}
+              userRole="COMPANY"
+              range={analyticsRange}
+              onRangeChange={setAnalyticsRange}
+            />
             
             {/* Stats Cards */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-6 mt-6">
@@ -280,8 +379,33 @@ const CompanyDashboard = ({ user }) => {
                             Reward: ${report.rewardAmount.toFixed(2)} USD
                           </p>
                           <p className="text-green-300 text-xs md:text-sm">
-                            ≈ ₹{(report.rewardAmount * 83).toFixed(2)} INR
+                            ≈ ₹{convertUSDToINR(report.rewardAmount).toFixed(2)} INR
                           </p>
+                        </div>
+                      )}
+
+                      {/* Attachments */}
+                      {attachmentsByReportId[report.id] && (
+                        <div className="mb-4">
+                          <div className="text-blue-400 font-semibold text-sm md:text-base mb-2">
+                            Attachments ({attachmentsByReportId[report.id].length})
+                          </div>
+                          {attachmentsByReportId[report.id].length > 0 && (
+                            <div className="flex flex-col gap-2">
+                              {attachmentsByReportId[report.id].map((att) => (
+                                <button
+                                  key={att.id}
+                                  onClick={() => openAttachmentPreview(report.id, att)}
+                                  className="px-3 md:px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold transition text-xs md:text-sm text-left"
+                                >
+                                  {att.name || "Attachment"}{" "}
+                                  <span className="text-gray-400 font-normal">
+                                    ({Math.round((att.size || 0) / 1024)} KB)
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
                       )}
                       {report.status === "PENDING" && (
@@ -338,6 +462,54 @@ const CompanyDashboard = ({ user }) => {
             </div>
           )}
         </div>
+
+        {/* Preview Modal */}
+        {previewOpen && (
+          <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+            <div className="bg-gray-800 rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+              <div className="flex items-start justify-between gap-4 mb-4">
+                <div>
+                  <h3 className="text-xl font-bold text-blue-400">{previewTitle}</h3>
+                  {previewError && (
+                    <p className="text-red-400 text-sm mt-2">{previewError}</p>
+                  )}
+                </div>
+                <button
+                  onClick={closePreview}
+                  className="text-gray-300 hover:text-white text-sm md:text-base"
+                >
+                  Close
+                </button>
+              </div>
+
+              {previewLoading ? (
+                <div className="text-gray-300 text-sm md:text-base">Loading preview...</div>
+              ) : previewText ? (
+                <pre className="bg-black rounded border border-gray-700 p-3 font-mono text-xs md:text-sm text-green-400 whitespace-pre-wrap overflow-x-auto">
+                  {previewText}
+                </pre>
+              ) : previewBlobUrl ? (
+                previewMimeType && previewMimeType.startsWith("image/") ? (
+                  <img
+                    src={previewBlobUrl}
+                    alt="preview"
+                    className="max-w-full rounded border border-gray-700"
+                  />
+                ) : (
+                  <iframe
+                    src={previewBlobUrl}
+                    title="attachment-preview"
+                    className="w-full h-[70vh] rounded border border-gray-700 bg-black"
+                  />
+                )
+              ) : (
+                <div className="text-gray-300 text-sm md:text-base">
+                  No preview available.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

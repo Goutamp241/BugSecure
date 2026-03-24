@@ -7,6 +7,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.time.DayOfWeek;
+import java.time.temporal.TemporalAdjusters;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -27,6 +29,10 @@ public class AnalyticsService {
     private UserRepository userRepository;
 
     public AnalyticsDTO getAdminAnalytics() {
+        return getAdminAnalytics("monthly");
+    }
+
+    public AnalyticsDTO getAdminAnalytics(String range) {
         AnalyticsDTO analytics = new AnalyticsDTO();
 
         // Basic counts
@@ -52,6 +58,11 @@ public class AnalyticsService {
         // Submissions by month (last 6 months)
         analytics.setSubmissionsByMonth(getSubmissionsByMonth());
 
+        // Phase 5 (filtered analytics)
+        analytics.setEarningsByPeriod(getEarningsByPeriod(range, null));
+        analytics.setBugsSubmittedVsAcceptedByPeriod(getBugsSubmittedVsAcceptedByPeriod(range, null));
+        analytics.setUserEarningsPie(getUserEarningsPie());
+
         // Bug reports by severity
         analytics.setBugReportsBySeverity(getBugReportsBySeverity());
 
@@ -68,6 +79,10 @@ public class AnalyticsService {
     }
 
     public AnalyticsDTO getCompanyAnalytics(String email) {
+        return getCompanyAnalytics(email, "monthly");
+    }
+
+    public AnalyticsDTO getCompanyAnalytics(String email, String range) {
         User company = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
@@ -103,10 +118,17 @@ public class AnalyticsService {
         analytics.setBugReportsBySeverity(getBugReportsBySeverityForCompany(company));
         analytics.setSubmissionsByMonth(getSubmissionsByMonthForCompany(company));
 
+        analytics.setEarningsByPeriod(getEarningsByPeriod(range, company));
+        analytics.setBugsSubmittedVsAcceptedByPeriod(getBugsSubmittedVsAcceptedByPeriod(range, company));
+
         return analytics;
     }
 
     public AnalyticsDTO getResearcherAnalytics(String email) {
+        return getResearcherAnalytics(email, "monthly");
+    }
+
+    public AnalyticsDTO getResearcherAnalytics(String email, String range) {
         User researcher = userRepository.findByEmail(email)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
@@ -131,6 +153,10 @@ public class AnalyticsService {
 
         analytics.setBugReportsBySeverity(getBugReportsBySeverityForResearcher(researcher));
 
+        analytics.setEarningsByPeriod(getEarningsByPeriod(range, null, researcher));
+        analytics.setBugsSubmittedVsAcceptedByPeriod(getBugsSubmittedVsAcceptedByPeriod(range, null, researcher));
+        analytics.setUserEarningsPie(getUserEarningsPieForResearcher(researcher));
+
         return analytics;
     }
 
@@ -153,6 +179,159 @@ public class AnalyticsService {
         }
         
         return result;
+    }
+
+    private List<Map<String, Object>> getEarningsByPeriod(String range, User companyScope) {
+        return getEarningsByPeriod(range, companyScope, null);
+    }
+
+    private List<Map<String, Object>> getEarningsByPeriod(String range, User companyScope, User researcherScope) {
+        List<Payment> payments = paymentRepository.findByStatus("COMPLETED");
+        if (companyScope != null) {
+            payments = payments.stream()
+                    .filter(p -> p.getCompany() != null && p.getCompany().getId() != null && p.getCompany().getId().equals(companyScope.getId()))
+                    .collect(Collectors.toList());
+        }
+        if (researcherScope != null) {
+            payments = payments.stream()
+                    .filter(p -> p.getResearcher() != null && p.getResearcher().getId() != null && p.getResearcher().getId().equals(researcherScope.getId()))
+                    .collect(Collectors.toList());
+        }
+
+        List<LocalDateTime[]> buckets = getPeriodBuckets(range);
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        for (LocalDateTime[] bucket : buckets) {
+            LocalDateTime start = bucket[0];
+            LocalDateTime end = bucket[1];
+            double sum = payments.stream()
+                    .filter(p -> p.getCreatedAt() != null && (p.getCreatedAt().isEqual(start) || p.getCreatedAt().isAfter(start)))
+                    .filter(p -> p.getCreatedAt() != null && p.getCreatedAt().isBefore(end))
+                    .mapToDouble(p -> p.getAmountUSD() != null ? p.getAmountUSD() : 0.0)
+                    .sum();
+
+            Map<String, Object> item = new HashMap<>();
+            item.put("period", formatBucketLabel(start, range));
+            item.put("earningsUSD", sum);
+            result.add(item);
+        }
+
+        return result;
+    }
+
+    private List<Map<String, Object>> getBugsSubmittedVsAcceptedByPeriod(String range, User companyScope) {
+        return getBugsSubmittedVsAcceptedByPeriod(range, companyScope, null);
+    }
+
+    private List<Map<String, Object>> getBugsSubmittedVsAcceptedByPeriod(String range, User companyScope, User researcherScope) {
+        List<BugReport> allReports = bugReportRepository.findAll();
+        if (companyScope != null) {
+            allReports = allReports.stream()
+                    .filter(br -> br.getCodeSubmission() != null && br.getCodeSubmission().getCompany() != null)
+                    .filter(br -> br.getCodeSubmission().getCompany().getId() != null && br.getCodeSubmission().getCompany().getId().equals(companyScope.getId()))
+                    .collect(Collectors.toList());
+        }
+        if (researcherScope != null) {
+            allReports = allReports.stream()
+                    .filter(br -> br.getReporter() != null && br.getReporter().getId() != null && br.getReporter().getId().equals(researcherScope.getId()))
+                    .collect(Collectors.toList());
+        }
+
+        List<LocalDateTime[]> buckets = getPeriodBuckets(range);
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        for (LocalDateTime[] bucket : buckets) {
+            LocalDateTime start = bucket[0];
+            LocalDateTime end = bucket[1];
+
+            long submitted = allReports.stream()
+                    .filter(br -> br.getCreatedAt() != null && !br.getCreatedAt().isBefore(start))
+                    .filter(br -> br.getCreatedAt() != null && br.getCreatedAt().isBefore(end))
+                    .count();
+
+            long accepted = allReports.stream()
+                    .filter(br -> "APPROVED".equalsIgnoreCase(br.getStatus()))
+                    .filter(br -> br.getUpdatedAt() != null && !br.getUpdatedAt().isBefore(start))
+                    .filter(br -> br.getUpdatedAt() != null && br.getUpdatedAt().isBefore(end))
+                    .count();
+
+            Map<String, Object> item = new HashMap<>();
+            item.put("period", formatBucketLabel(start, range));
+            item.put("submittedCount", submitted);
+            item.put("acceptedCount", accepted);
+            result.add(item);
+        }
+
+        return result;
+    }
+
+    private List<Map<String, Object>> getUserEarningsPie() {
+        // Use top researchers data as "user earnings" distribution.
+        // (Front-end will render as pie.)
+        List<Map<String, Object>> top = getTopResearchers();
+        return top.stream()
+                .map(t -> Map.of(
+                        "name", t.get("name"),
+                        "earningsUSD", t.get("earnings")
+                ))
+                .collect(Collectors.toList());
+    }
+
+    private List<Map<String, Object>> getUserEarningsPieForResearcher(User researcher) {
+        // Simple pie: researcher gets a single slice (100%).
+        List<Payment> completed = paymentRepository.findByResearcher(researcher).stream()
+                .filter(p -> "COMPLETED".equals(p.getStatus()))
+                .collect(Collectors.toList());
+
+        double sum = completed.stream().mapToDouble(p -> p.getAmountUSD() != null ? p.getAmountUSD() : 0.0).sum();
+        return List.of(Map.of("name", researcher.getUsername(), "earningsUSD", sum));
+    }
+
+    private List<LocalDateTime[]> getPeriodBuckets(String range) {
+        String normalized = range == null ? "monthly" : range.toLowerCase(Locale.ROOT);
+        LocalDateTime now = LocalDateTime.now();
+        List<LocalDateTime[]> buckets = new ArrayList<>();
+
+        if ("weekly".equals(normalized)) {
+            // Last 8 weeks
+            for (int i = 7; i >= 0; i--) {
+                LocalDateTime start = now.minusWeeks(i);
+                // Use Monday as week start
+                start = start.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+                        .withHour(0).withMinute(0).withSecond(0).withNano(0);
+                LocalDateTime end = start.plusWeeks(1);
+                buckets.add(new LocalDateTime[]{start, end});
+            }
+        } else if ("yearly".equals(normalized)) {
+            // Last 5 years
+            for (int i = 4; i >= 0; i--) {
+                LocalDateTime start = now.minusYears(i).withDayOfYear(1)
+                        .withHour(0).withMinute(0).withSecond(0).withNano(0);
+                LocalDateTime end = start.plusYears(1);
+                buckets.add(new LocalDateTime[]{start, end});
+            }
+        } else {
+            // Default: monthly (last 12 months)
+            for (int i = 11; i >= 0; i--) {
+                LocalDateTime start = now.minusMonths(i).withDayOfMonth(1)
+                        .withHour(0).withMinute(0).withSecond(0).withNano(0);
+                LocalDateTime end = start.plusMonths(1);
+                buckets.add(new LocalDateTime[]{start, end});
+            }
+        }
+
+        return buckets;
+    }
+
+    private String formatBucketLabel(LocalDateTime start, String range) {
+        String normalized = range == null ? "monthly" : range.toLowerCase(Locale.ROOT);
+        if ("weekly".equals(normalized)) {
+            return start.format(DateTimeFormatter.ofPattern("MMM d"));
+        }
+        if ("yearly".equals(normalized)) {
+            return start.format(DateTimeFormatter.ofPattern("yyyy"));
+        }
+        return start.format(DateTimeFormatter.ofPattern("MMM yyyy"));
     }
 
     private List<Map<String, Object>> getSubmissionsByMonthForCompany(User company) {

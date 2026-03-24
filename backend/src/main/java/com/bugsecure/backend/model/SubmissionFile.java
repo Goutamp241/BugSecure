@@ -16,6 +16,10 @@ public class SubmissionFile {
     private String fileContent; // Base64 encoded content or file path
     private Long fileSize; // File size in bytes
     private LocalDateTime uploadedAt;
+
+    // Secure storage location for file bytes (used for previews).
+    private String storageKey;
+    private String storageMimeType;
     
     @DBRef
     private CodeSubmission submission;
@@ -80,6 +84,22 @@ public class SubmissionFile {
 
     public void setFileContent(String fileContent) {
         this.fileContent = fileContent;
+    }
+
+    public String getStorageKey() {
+        return storageKey;
+    }
+
+    public void setStorageKey(String storageKey) {
+        this.storageKey = storageKey;
+    }
+
+    public String getStorageMimeType() {
+        return storageMimeType;
+    }
+
+    public void setStorageMimeType(String storageMimeType) {
+        this.storageMimeType = storageMimeType;
     }
 
     public Long getFileSize() {

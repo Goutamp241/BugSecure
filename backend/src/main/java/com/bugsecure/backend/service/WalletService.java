@@ -8,6 +8,7 @@ import com.bugsecure.backend.repository.PaymentRepository;
 import com.bugsecure.backend.repository.UserRepository;
 import com.bugsecure.backend.repository.WalletTransactionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +30,9 @@ public class WalletService {
 
     @Autowired
     private PaymentRepository paymentRepository;
+
+    @Value("${platform.admin.email:bugsecure12admin@gmail.com}")
+    private String platformAdminEmail;
 
     private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -290,6 +294,127 @@ public class WalletService {
         response.put("researcherBalance", toResearcher.getBalance());
         response.put("amount", amount);
         return response;
+    }
+
+    /**
+     * Bounty split logic:
+     * - Company is debited by full bountyAmountUSD (gross)
+     * - Researcher is credited by researcherNetAmountUSD (net after commission)
+     * - Platform/admin is credited by platformCommissionAmountUSD
+     *
+     * IMPORTANT: This method should be used for APPROVED bug reports to prevent commission leakage.
+     */
+    @Transactional
+    public void transferBountyWithCommissionToResearcher(
+            String fromCompanyId,
+            String toResearcherId,
+            Double bountyAmountUSD,
+            Double researcherNetAmountUSD,
+            Double platformCommissionAmountUSD,
+            String platformAdminEmailOverride,
+            String researcherDescription,
+            String companyDescription,
+            String platformDescription
+    ) {
+        if (bountyAmountUSD == null || bountyAmountUSD <= 0) {
+            throw new RuntimeException("Bounty amount must be greater than 0");
+        }
+        if (researcherNetAmountUSD == null || researcherNetAmountUSD < 0) {
+            throw new RuntimeException("Researcher net amount is invalid");
+        }
+        if (platformCommissionAmountUSD == null || platformCommissionAmountUSD < 0) {
+            throw new RuntimeException("Platform commission amount is invalid");
+        }
+        if (Math.abs((researcherNetAmountUSD + platformCommissionAmountUSD) - bountyAmountUSD) > 0.000001) {
+            throw new RuntimeException("Bounty split amounts do not sum to the bounty amount");
+        }
+
+        User fromCompany = userRepository.findById(fromCompanyId)
+                .orElseThrow(() -> new RuntimeException("Company not found"));
+        User toResearcher = userRepository.findById(toResearcherId)
+                .orElseThrow(() -> new RuntimeException("Researcher not found"));
+        User platformAdmin = userRepository.findByEmail(
+                        platformAdminEmailOverride != null ? platformAdminEmailOverride : platformAdminEmail
+                )
+                .orElseThrow(() -> new RuntimeException("Platform admin user not found"));
+
+        if (!"COMPANY".equals(fromCompany.getRole())) {
+            throw new RuntimeException("Only companies can initiate transfers");
+        }
+        if (!"USER".equals(toResearcher.getRole())) {
+            throw new RuntimeException("Transfers can only be made to researchers");
+        }
+        if (!"ADMIN".equals(platformAdmin.getRole())) {
+            throw new RuntimeException("Platform admin is not an ADMIN user");
+        }
+
+        // Ensure wallets exist
+        if (fromCompany.getWalletAddress() == null || fromCompany.getWalletAddress().isEmpty()) {
+            fromCompany.setWalletAddress(generateWalletAddress());
+            fromCompany.setBalance(0.0);
+        }
+        if (toResearcher.getWalletAddress() == null || toResearcher.getWalletAddress().isEmpty()) {
+            toResearcher.setWalletAddress(generateWalletAddress());
+            toResearcher.setBalance(0.0);
+        }
+        if (platformAdmin.getWalletAddress() == null || platformAdmin.getWalletAddress().isEmpty()) {
+            platformAdmin.setWalletAddress(generateWalletAddress());
+            platformAdmin.setBalance(0.0);
+        }
+
+        Double companyBalance = fromCompany.getBalance() != null ? fromCompany.getBalance() : 0.0;
+        if (companyBalance < bountyAmountUSD) {
+            throw new RuntimeException("Insufficient balance in company wallet");
+        }
+
+        // Update balances
+        fromCompany.setBalance(companyBalance - bountyAmountUSD);
+        Double researcherBalance = toResearcher.getBalance() != null ? toResearcher.getBalance() : 0.0;
+        toResearcher.setBalance(researcherBalance + researcherNetAmountUSD);
+        Double platformBalance = platformAdmin.getBalance() != null ? platformAdmin.getBalance() : 0.0;
+        platformAdmin.setBalance(platformBalance + platformCommissionAmountUSD);
+
+        userRepository.save(fromCompany);
+        userRepository.save(toResearcher);
+        userRepository.save(platformAdmin);
+
+        // Shared transaction hash to link mirrored entries
+        String transactionHash = generateTransactionHash();
+
+        // Company debit entry
+        WalletTransaction companyTransaction = new WalletTransaction();
+        companyTransaction.setTransactionType("TRANSFER");
+        companyTransaction.setAmount(bountyAmountUSD);
+        companyTransaction.setUser(fromCompany);
+        companyTransaction.setToUser(toResearcher);
+        companyTransaction.setStatus("COMPLETED");
+        companyTransaction.setDescription(companyDescription != null ? companyDescription : "Bounty paid to researcher");
+        companyTransaction.setTransactionHash(transactionHash);
+        companyTransaction.setCreatedAtIfNew();
+        walletTransactionRepository.save(companyTransaction);
+
+        // Researcher credit entry (net)
+        WalletTransaction researcherTransaction = new WalletTransaction();
+        researcherTransaction.setTransactionType("REWARD");
+        researcherTransaction.setAmount(researcherNetAmountUSD);
+        researcherTransaction.setUser(toResearcher);
+        researcherTransaction.setFromUser(fromCompany);
+        researcherTransaction.setStatus("COMPLETED");
+        researcherTransaction.setDescription(researcherDescription != null ? researcherDescription : "Bug bounty reward (net)");
+        researcherTransaction.setTransactionHash(transactionHash);
+        researcherTransaction.setCreatedAtIfNew();
+        walletTransactionRepository.save(researcherTransaction);
+
+        // Platform/admin commission entry
+        WalletTransaction platformTransaction = new WalletTransaction();
+        platformTransaction.setTransactionType("REWARD");
+        platformTransaction.setAmount(platformCommissionAmountUSD);
+        platformTransaction.setUser(platformAdmin);
+        platformTransaction.setStatus("COMPLETED");
+        platformTransaction.setDescription(platformDescription != null ? platformDescription : "BugSecure platform commission");
+        platformTransaction.setTransactionHash(transactionHash);
+        platformTransaction.setCreatedAtIfNew();
+        walletTransactionRepository.save(platformTransaction);
     }
 
     // Legacy transfer method (kept for backward compatibility)

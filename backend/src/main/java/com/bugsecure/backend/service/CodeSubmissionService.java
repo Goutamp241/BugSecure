@@ -30,6 +30,9 @@ public class CodeSubmissionService {
     @Autowired
     private SubmissionFileRepository submissionFileRepository;
 
+    @Autowired
+    private SecureLocalFileStorageService storageService;
+
     private static final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     @Transactional
@@ -63,7 +66,26 @@ public class CodeSubmissionService {
         }
         
         submission.setFileName(primaryFileName);
-        submission.setCodeContent(primaryCodeContent);
+
+        // Store primary code securely on disk (avoid storing raw code content in DB for new submissions).
+        String submissionStorageFolder = "code_submissions/" + java.util.UUID.randomUUID().toString().replace("-", "");
+        byte[] codeBytes = SecureLocalFileStorageService.decodeContentToBytes(primaryCodeContent);
+        String codeMimeType = "text/plain";
+        // If primaryCodeContent is a data URL, extract mime type.
+        String extractedMime = SecureLocalFileStorageService.extractMimeTypeFromDataUrl(primaryCodeContent);
+        if (extractedMime != null && !extractedMime.isBlank()) {
+            codeMimeType = extractedMime;
+        }
+        SecureLocalFileStorageService.StoredFile storedCode = storageService.storeBytes(
+                submissionStorageFolder,
+                primaryFileName,
+                codeMimeType,
+                codeBytes
+        );
+        submission.setCodeStorageKey(storedCode.getStorageKey());
+        submission.setCodeMimeType(storedCode.getMimeType());
+        submission.setCodeSizeBytes(storedCode.getSizeBytes());
+        submission.setCodeContent(null);
         
         if (dto.getRewardAmount() == null || dto.getRewardAmount() <= 0) {
             throw new RuntimeException("Reward amount must be greater than 0");
@@ -83,7 +105,28 @@ public class CodeSubmissionService {
                 file.setFileName((String) fileData.get("name"));
                 file.setFileType((String) fileData.get("type"));
                 file.setMimeType((String) fileData.get("mimeType"));
-                file.setFileContent((String) fileData.get("content"));
+                String mimeType = (String) fileData.get("mimeType");
+                String content = (String) fileData.get("content");
+                byte[] bytes = SecureLocalFileStorageService.decodeContentToBytes(content);
+
+                // If mimeType is missing but content is a data URL, try extracting it.
+                if (mimeType == null || mimeType.isBlank()) {
+                    String extracted = SecureLocalFileStorageService.extractMimeTypeFromDataUrl(content);
+                    if (extracted != null) {
+                        mimeType = extracted;
+                    }
+                }
+
+                SecureLocalFileStorageService.StoredFile storedFile = storageService.storeBytes(
+                        submissionStorageFolder,
+                        (String) fileData.get("name"),
+                        mimeType,
+                        bytes
+                );
+
+                file.setStorageKey(storedFile.getStorageKey());
+                file.setStorageMimeType(storedFile.getMimeType());
+                file.setFileContent(null);
                 file.setFileSize(((Number) fileData.get("size")).longValue());
                 file.setSubmission(saved);
                 file.setUploadedAtIfNew(); // Set timestamp for MongoDB
@@ -205,7 +248,29 @@ public class CodeSubmissionService {
         submission.setTitle(dto.getTitle());
         submission.setDescription(dto.getDescription());
         submission.setFileName(dto.getFileName());
-        submission.setCodeContent(dto.getCodeContent());
+
+        // Update secure storage for code (avoid persisting raw content).
+        String updatedCodeContent = dto.getCodeContent() != null ? dto.getCodeContent() : "";
+        String submissionStorageFolder = "code_submissions_update/" + java.util.UUID.randomUUID().toString().replace("-", "");
+        byte[] codeBytes = SecureLocalFileStorageService.decodeContentToBytes(updatedCodeContent);
+
+        String codeMimeType = "text/plain";
+        String extractedMime = SecureLocalFileStorageService.extractMimeTypeFromDataUrl(updatedCodeContent);
+        if (extractedMime != null && !extractedMime.isBlank()) {
+            codeMimeType = extractedMime;
+        }
+
+        SecureLocalFileStorageService.StoredFile storedCode = storageService.storeBytes(
+                submissionStorageFolder,
+                dto.getFileName() != null ? dto.getFileName() : "code.txt",
+                codeMimeType,
+                codeBytes
+        );
+        submission.setCodeStorageKey(storedCode.getStorageKey());
+        submission.setCodeMimeType(storedCode.getMimeType());
+        submission.setCodeSizeBytes(storedCode.getSizeBytes());
+        submission.setCodeContent(null);
+
         submission.setRewardAmount(dto.getRewardAmount());
         submission.setStatus(dto.getStatus());
         submission.updateTimestamp(); // Update timestamp for MongoDB
@@ -230,7 +295,8 @@ public class CodeSubmissionService {
         dto.setTitle(submission.getTitle());
         dto.setDescription(submission.getDescription());
         dto.setFileName(submission.getFileName());
-        dto.setCodeContent(submission.getCodeContent());
+        // Never return raw code content in list/detail APIs.
+        dto.setCodeContent(null);
         dto.setStatus(submission.getStatus());
         dto.setRewardAmount(submission.getRewardAmount());
         dto.setWebsite(submission.getWebsite());
@@ -249,7 +315,6 @@ public class CodeSubmissionService {
             fileMap.put("type", file.getFileType());
             fileMap.put("mimeType", file.getMimeType());
             fileMap.put("size", file.getFileSize());
-            fileMap.put("content", file.getFileContent());
             fileList.add(fileMap);
         }
         dto.setFiles(fileList);

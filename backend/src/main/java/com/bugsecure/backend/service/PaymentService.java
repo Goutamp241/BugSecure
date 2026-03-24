@@ -52,16 +52,34 @@ public class PaymentService {
             throw new RuntimeException("Payment already exists for this bug report");
         });
 
-        Double amountUSD = bugReport.getRewardAmount();
-        if (amountUSD == null || amountUSD <= 0) {
-            throw new RuntimeException("Invalid reward amount");
+        // BugReport.rewardAmount is treated as researcher net in this phase.
+        Double bountyUSD = bugReport.getBountyAmountUSD() != null ? bugReport.getBountyAmountUSD() : bugReport.getRewardAmount();
+        Double netUSD = bugReport.getResearcherNetAmountUSD() != null ? bugReport.getResearcherNetAmountUSD() : bugReport.getRewardAmount();
+        Double commissionUSD = bugReport.getPlatformCommissionAmountUSD() != null ? bugReport.getPlatformCommissionAmountUSD() : 0.0;
+
+        if (bountyUSD == null || bountyUSD <= 0) {
+            throw new RuntimeException("Invalid bounty amount");
+        }
+        if (netUSD == null || netUSD < 0) {
+            throw new RuntimeException("Invalid net reward amount");
         }
 
-        Double amountINR = amountUSD * USD_TO_INR_RATE;
+        Double netINR = netUSD * USD_TO_INR_RATE;
+        Double bountyINR = bountyUSD * USD_TO_INR_RATE;
+        Double commissionINR = commissionUSD * USD_TO_INR_RATE;
 
         Payment payment = new Payment();
-        payment.setAmountUSD(amountUSD);
-        payment.setAmountINR(amountINR);
+        // amountUSD/INR are treated as "researcher net" in this phase.
+        payment.setAmountUSD(netUSD);
+        payment.setAmountINR(netINR);
+
+        payment.setBountyAmountUSD(bountyUSD);
+        payment.setBountyAmountINR(bountyINR);
+        payment.setResearcherNetAmountUSD(netUSD);
+        payment.setResearcherNetAmountINR(netINR);
+        payment.setPlatformCommissionAmountUSD(commissionUSD);
+        payment.setPlatformCommissionAmountINR(commissionINR);
+
         payment.setPaymentMethod(paymentMethod);
         payment.setBugReport(bugReport);
         payment.setCompany(company);
@@ -70,7 +88,7 @@ public class PaymentService {
         payment.setCreatedAtIfNew(); // Set timestamps for MongoDB
 
         Payment saved = paymentRepository.save(payment);
-        return convertToDTO(saved);
+        return convertToDTO(saved, company.getRole());
     }
 
     public List<PaymentDTO> getPaymentsByCompany(String email) {
@@ -78,7 +96,7 @@ public class PaymentService {
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         return paymentRepository.findByCompany(company).stream()
-                .map(this::convertToDTO)
+                .map(p -> convertToDTO(p, "COMPANY"))
                 .collect(Collectors.toList());
     }
 
@@ -87,7 +105,7 @@ public class PaymentService {
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         return paymentRepository.findByResearcher(researcher).stream()
-                .map(this::convertToDTO)
+                .map(p -> convertToDTO(p, "USER"))
                 .collect(Collectors.toList());
     }
 
@@ -115,42 +133,52 @@ public class PaymentService {
         payment.updateTimestamp(); // Update timestamp for MongoDB
 
         Payment updated = paymentRepository.save(payment);
-        
-        // If payment is completed, add reward to researcher's wallet
+
+        // In this phase, wallet credit happens when the bug report is APPROVED.
+        // For backwards compatibility, only credit if wallet split hasn't run.
         if ("COMPLETED".equals(status) && updated.getResearcher() != null) {
             try {
-                walletService.addReward(
-                    updated.getResearcher().getEmail(),
-                    updated.getAmountUSD(),
-                    updated.getId(),
-                    "Bug bounty reward for: " + updated.getBugReport().getTitle()
-                );
+                boolean splitDone = updated.getBugReport() != null && updated.getBugReport().getWalletSplitCompleted();
+                if (!splitDone) {
+                    walletService.addReward(
+                            updated.getResearcher().getEmail(),
+                            updated.getAmountUSD(), // net
+                            updated.getId(),
+                            "Bug bounty reward for: " + (updated.getBugReport() != null ? updated.getBugReport().getTitle() : "unknown submission")
+                    );
+                }
             } catch (Exception e) {
                 // Log error but don't fail the payment update
                 System.err.println("Failed to add reward to wallet: " + e.getMessage());
             }
         }
-        
-        return convertToDTO(updated);
+
+        return convertToDTO(updated, user.getRole());
     }
 
     public PaymentDTO getPaymentById(String id) {
         Payment payment = paymentRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Payment not found"));
-        return convertToDTO(payment);
+        // Default to researcher net view.
+        return convertToDTO(payment, "USER");
     }
 
     public List<PaymentDTO> getAllPayments() {
         return paymentRepository.findAll().stream()
-                .map(this::convertToDTO)
+                .map(p -> convertToDTO(p, "USER"))
                 .collect(Collectors.toList());
     }
 
-    private PaymentDTO convertToDTO(Payment payment) {
+    private PaymentDTO convertToDTO(Payment payment, String viewerRole) {
         PaymentDTO dto = new PaymentDTO();
         dto.setId(payment.getId());
-        dto.setAmountUSD(payment.getAmountUSD());
-        dto.setAmountINR(payment.getAmountINR());
+        if ("COMPANY".equals(viewerRole)) {
+            dto.setAmountUSD(payment.getBountyAmountUSD() != null ? payment.getBountyAmountUSD() : payment.getAmountUSD());
+            dto.setAmountINR(payment.getBountyAmountINR() != null ? payment.getBountyAmountINR() : payment.getAmountINR());
+        } else {
+            dto.setAmountUSD(payment.getAmountUSD()); // net
+            dto.setAmountINR(payment.getAmountINR());
+        }
         dto.setStatus(payment.getStatus());
         dto.setPaymentMethod(payment.getPaymentMethod());
         dto.setTransactionId(payment.getTransactionId());

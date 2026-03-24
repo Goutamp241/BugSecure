@@ -28,6 +28,18 @@ public class BugReport {
     
     private Double rewardAmount;
 
+    // Gross bounty amount (company debited) in USD, before platform commission is deducted.
+    private Double bountyAmountUSD;
+
+    // Platform commission amount in USD (admin/platform share) for this approved bug report.
+    private Double platformCommissionAmountUSD;
+
+    // Net amount in USD credited to the researcher (bounty - commission).
+    private Double researcherNetAmountUSD;
+
+    // Prevent double-crediting wallet entries if APPROVED is processed more than once.
+    private Boolean walletSplitCompleted = false;
+
     // Constructors
     public BugReport() {
     }
@@ -161,6 +173,38 @@ public class BugReport {
 
     public void setRewardAmount(Double rewardAmount) {
         this.rewardAmount = rewardAmount;
+    }
+
+    public Double getBountyAmountUSD() {
+        return bountyAmountUSD;
+    }
+
+    public void setBountyAmountUSD(Double bountyAmountUSD) {
+        this.bountyAmountUSD = bountyAmountUSD;
+    }
+
+    public Double getPlatformCommissionAmountUSD() {
+        return platformCommissionAmountUSD;
+    }
+
+    public void setPlatformCommissionAmountUSD(Double platformCommissionAmountUSD) {
+        this.platformCommissionAmountUSD = platformCommissionAmountUSD;
+    }
+
+    public Double getResearcherNetAmountUSD() {
+        return researcherNetAmountUSD;
+    }
+
+    public void setResearcherNetAmountUSD(Double researcherNetAmountUSD) {
+        this.researcherNetAmountUSD = researcherNetAmountUSD;
+    }
+
+    public Boolean getWalletSplitCompleted() {
+        return walletSplitCompleted != null ? walletSplitCompleted : false;
+    }
+
+    public void setWalletSplitCompleted(Boolean walletSplitCompleted) {
+        this.walletSplitCompleted = walletSplitCompleted;
     }
 }
 

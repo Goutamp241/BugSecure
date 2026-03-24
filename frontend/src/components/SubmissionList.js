@@ -2,11 +2,26 @@ import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import API from "../services/api";
 import BugReportForm from "./BugReportForm";
+import { convertUSDToINR } from "../utils/currency";
 
 const SubmissionList = ({ submissions, onUpdate, onViewBugReports, isCompanyView }) => {
   const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [showBugReportForm, setShowBugReportForm] = useState(false);
   const navigate = useNavigate();
+
+  const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
+  const canPreviewSubmission =
+    currentUser?.role === "ADMIN" ||
+    currentUser?.role === "COMPANY" ||
+    (currentUser?.role === "USER" && currentUser?.contractAccepted);
+
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewTitle, setPreviewTitle] = useState("");
+  const [previewText, setPreviewText] = useState("");
+  const [previewBlobUrl, setPreviewBlobUrl] = useState(null);
+  const [previewMimeType, setPreviewMimeType] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
 
   const handleDelete = async (id) => {
     if (window.confirm("Are you sure you want to delete this submission?")) {
@@ -46,6 +61,82 @@ const SubmissionList = ({ submissions, onUpdate, onViewBugReports, isCompanyView
     navigate("/dashboard");
   };
 
+  const closePreview = () => {
+    setPreviewOpen(false);
+    setPreviewTitle("");
+    setPreviewText("");
+    setPreviewError("");
+    setPreviewLoading(false);
+    if (previewBlobUrl) {
+      URL.revokeObjectURL(previewBlobUrl);
+    }
+    setPreviewBlobUrl(null);
+    setPreviewMimeType("");
+  };
+
+  const handlePreviewCode = async (submissionId) => {
+    setPreviewOpen(true);
+    setPreviewLoading(true);
+    setPreviewError("");
+    setPreviewText("");
+    if (previewBlobUrl) {
+      URL.revokeObjectURL(previewBlobUrl);
+    }
+    setPreviewBlobUrl(null);
+    setPreviewMimeType("");
+    setPreviewTitle("Code Preview");
+
+    try {
+      const res = await API.get(`/api/submissions/${submissionId}/code/preview`, {
+        params: { limit: 60000 },
+        responseType: "text",
+      });
+      setPreviewText(res.data || "");
+    } catch (e) {
+      setPreviewError(e.response?.data?.error || "Failed to preview code");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handlePreviewFile = async (file) => {
+    setPreviewOpen(true);
+    setPreviewLoading(true);
+    setPreviewError("");
+    setPreviewText("");
+    if (previewBlobUrl) {
+      URL.revokeObjectURL(previewBlobUrl);
+    }
+    setPreviewBlobUrl(null);
+    setPreviewMimeType("");
+    setPreviewTitle(file?.name || "File Preview");
+
+    try {
+      const mimeType = file?.mimeType || "";
+      const isTextLike = (mimeType && mimeType.startsWith("text/")) || file?.type === "CODE";
+
+      if (isTextLike) {
+        const res = await API.get(`/api/submissions/files/${file.id}/preview`, {
+          params: { limit: 60000 },
+          responseType: "text",
+        });
+        setPreviewText(res.data || "");
+      } else {
+        const res = await API.get(`/api/submissions/files/${file.id}/preview`, {
+          responseType: "blob",
+        });
+        const blob = res.data;
+        const url = URL.createObjectURL(blob);
+        setPreviewBlobUrl(url);
+        setPreviewMimeType(blob?.type || mimeType || "application/octet-stream");
+      }
+    } catch (e) {
+      setPreviewError(e.response?.data?.error || "Failed to preview file");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   if (submissions.length === 0) {
     return (
       <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
@@ -81,7 +172,9 @@ const SubmissionList = ({ submissions, onUpdate, onViewBugReports, isCompanyView
                 <p className="text-gray-300 mb-2 text-sm md:text-base break-words">{submission.description}</p>
                 <div className="flex flex-col sm:flex-row flex-wrap gap-2 sm:gap-4 text-xs md:text-sm text-gray-400 mb-2">
                   <span className="break-words">File: {submission.fileName || "N/A"}</span>
-                  <span className="break-words">Reward: ₹{(((submission.rewardAmount || 0) * 83)).toFixed(2)} INR (≈ ${submission.rewardAmount?.toFixed(2) || "0.00"} USD)</span>
+                  <span className="break-words">
+                    Reward: ₹{convertUSDToINR(submission.rewardAmount || 0).toFixed(2)} INR (≈ ${submission.rewardAmount?.toFixed(2) || "0.00"} USD)
+                  </span>
                   <span>Created: {new Date(submission.createdAt).toLocaleDateString()}</span>
                 </div>
                 {!isCompanyView && (
@@ -130,17 +223,47 @@ const SubmissionList = ({ submissions, onUpdate, onViewBugReports, isCompanyView
               </span>
             </div>
 
-            {submission.codeContent && (
-              <div className="mb-4">
-                <details>
-                  <summary className="cursor-pointer text-blue-400 hover:text-blue-300 font-semibold mb-2 text-sm md:text-base">
-                    View Code
-                  </summary>
-                  <pre className="bg-gray-900 p-2 md:p-4 rounded-lg overflow-x-auto text-xs md:text-sm text-gray-300">
-                    {submission.codeContent.substring(0, 500)}
-                    {submission.codeContent.length > 500 && "..."}
-                  </pre>
-                </details>
+            {canPreviewSubmission && (
+              <div className="mb-4 flex flex-col gap-3">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => handlePreviewCode(submission.id)}
+                    className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition text-xs md:text-sm"
+                  >
+                    Preview Code
+                  </button>
+                </div>
+
+                {submission.files && submission.files.length > 0 && (
+                  <details>
+                    <summary className="cursor-pointer text-blue-400 hover:text-blue-300 font-semibold mb-1 text-sm md:text-base">
+                      Attachments ({submission.files.length})
+                    </summary>
+                    <div className="space-y-2 mt-2">
+                      {submission.files.map((file) => (
+                        <div
+                          key={file.id}
+                          className="bg-gray-900/40 border border-gray-700 rounded-lg p-3 flex items-center justify-between gap-3"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-white font-medium truncate text-sm md:text-base">
+                              {file.name}
+                            </p>
+                            <p className="text-gray-400 text-xs md:text-sm">
+                              {file.type} • {file.mimeType || "unknown"} • {file.size || 0} bytes
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handlePreviewFile(file)}
+                            className="shrink-0 px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold text-xs md:text-sm transition"
+                          >
+                            Preview
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                )}
               </div>
             )}
 
@@ -181,6 +304,51 @@ const SubmissionList = ({ submissions, onUpdate, onViewBugReports, isCompanyView
           </div>
         ))}
       </div>
+
+      {previewOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <h3 className="text-xl font-bold text-blue-400">{previewTitle}</h3>
+                {previewError && <p className="text-red-400 text-sm mt-2">{previewError}</p>}
+              </div>
+              <button
+                onClick={closePreview}
+                className="text-gray-300 hover:text-white text-sm md:text-base"
+              >
+                Close
+              </button>
+            </div>
+
+            {previewLoading ? (
+              <div className="text-gray-300 text-sm md:text-base">Loading preview...</div>
+            ) : previewText ? (
+              <pre className="bg-black rounded border border-gray-700 p-3 font-mono text-xs md:text-sm text-green-400 whitespace-pre-wrap overflow-x-auto">
+                {previewText}
+              </pre>
+            ) : previewBlobUrl ? (
+              <div>
+                {previewMimeType && previewMimeType.startsWith("image/") ? (
+                  <img
+                    src={previewBlobUrl}
+                    alt="preview"
+                    className="max-w-full rounded border border-gray-700"
+                  />
+                ) : (
+                  <iframe
+                    src={previewBlobUrl}
+                    title="preview"
+                    className="w-full h-[70vh] rounded border border-gray-700 bg-black"
+                  />
+                )}
+              </div>
+            ) : (
+              <div className="text-gray-300 text-sm md:text-base">No preview available.</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

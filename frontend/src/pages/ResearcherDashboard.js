@@ -4,20 +4,49 @@ import API from "../services/api";
 import SubmissionList from "../components/SubmissionList";
 import AnalyticsCharts from "../components/AnalyticsCharts";
 import Wallet from "../components/Wallet";
+import { convertUSDToINR } from "../utils/currency";
+import NotificationsWidget from "../components/NotificationsWidget";
 
 const ResearcherDashboard = ({ user }) => {
   const [submissions, setSubmissions] = useState([]);
   const [bugReports, setBugReports] = useState([]);
   const [loading, setLoading] = useState(true);
   const [analytics, setAnalytics] = useState(null);
+  const [analyticsRange, setAnalyticsRange] = useState("monthly");
   const [sortBy, setSortBy] = useState("");
+  const [bugFilters, setBugFilters] = useState({
+    q: "",
+    status: "",
+    severity: "",
+  });
+  const [bugMeta, setBugMeta] = useState(null);
+  const [bugPage, setBugPage] = useState(0);
+  const [bugPageSize, setBugPageSize] = useState(10);
+  const [bugLoading, setBugLoading] = useState(false);
   const navigate = useNavigate();
+
+  const [attachmentsByReportId, setAttachmentsByReportId] = useState({});
+  const [uploadFilesByReportId, setUploadFilesByReportId] = useState({});
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewTitle, setPreviewTitle] = useState("");
+  const [previewText, setPreviewText] = useState("");
+  const [previewBlobUrl, setPreviewBlobUrl] = useState(null);
+  const [previewMimeType, setPreviewMimeType] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState("");
 
   useEffect(() => {
     fetchSubmissions();
-    fetchMyBugReports();
-    fetchAnalytics();
   }, [sortBy]);
+
+  useEffect(() => {
+    fetchMyBugReports();
+  }, [bugPage, bugPageSize]);
+
+  useEffect(() => {
+    fetchAnalytics();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analyticsRange]);
 
   const fetchSubmissions = async () => {
     try {
@@ -37,25 +66,138 @@ const ResearcherDashboard = ({ user }) => {
     }
   };
 
-  const fetchMyBugReports = async () => {
+  const fetchMyBugReports = async (overrides = {}) => {
+    const pageToUse = overrides.page != null ? overrides.page : bugPage;
+    const pageSizeToUse =
+      overrides.pageSize != null ? overrides.pageSize : bugPageSize;
     try {
-      const res = await API.get("/api/bug-reports/my-reports");
+      setBugLoading(true);
+      const res = await API.get("/api/bug-reports/my-reports", {
+        params: {
+          q: bugFilters.q || undefined,
+          status: bugFilters.status || undefined,
+          severity: bugFilters.severity || undefined,
+          page: pageToUse,
+          pageSize: pageSizeToUse,
+        },
+      });
       if (res.data.success) {
         setBugReports(res.data.data);
+        setBugMeta(res.data.meta || null);
       }
     } catch (error) {
       console.error("Error fetching bug reports:", error);
+    } finally {
+      setBugLoading(false);
     }
   };
 
   const fetchAnalytics = async () => {
     try {
-      const res = await API.get("/api/analytics/researcher");
+      const res = await API.get(`/api/analytics/researcher?range=${analyticsRange}`);
       if (res.data.success) {
         setAnalytics(res.data.data);
       }
     } catch (error) {
       console.error("Error fetching analytics:", error);
+    }
+  };
+
+  const loadAttachmentsForReport = async (reportId) => {
+    try {
+      const res = await API.get(`/api/bug-reports/${reportId}/attachments`);
+      if (res.data.success) {
+        setAttachmentsByReportId((prev) => ({ ...prev, [reportId]: res.data.data || [] }));
+      }
+    } catch (e) {
+      console.error("Failed to load attachments:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (!bugReports || bugReports.length === 0) return;
+    bugReports.forEach((r) => loadAttachmentsForReport(r.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bugReports]);
+
+  const closePreview = () => {
+    setPreviewOpen(false);
+    setPreviewTitle("");
+    setPreviewText("");
+    setPreviewError("");
+    setPreviewLoading(false);
+    if (previewBlobUrl) {
+      URL.revokeObjectURL(previewBlobUrl);
+    }
+    setPreviewBlobUrl(null);
+    setPreviewMimeType("");
+  };
+
+  const openAttachmentPreview = async (reportId, attachment) => {
+    setPreviewOpen(true);
+    setPreviewLoading(true);
+    setPreviewError("");
+    setPreviewText("");
+    if (previewBlobUrl) URL.revokeObjectURL(previewBlobUrl);
+    setPreviewBlobUrl(null);
+    setPreviewMimeType("");
+    setPreviewTitle(attachment?.name || "Attachment Preview");
+
+    try {
+      const mimeType = attachment?.mimeType || "";
+      const treatAsText = mimeType.startsWith("text/") || attachment?.type === "CODE";
+
+      if (treatAsText) {
+        const res = await API.get(
+          `/api/bug-reports/${reportId}/attachments/${attachment.id}/preview`,
+          {
+            params: { limit: 60000 },
+            responseType: "text",
+          }
+        );
+        setPreviewText(res.data || "");
+      } else {
+        const res = await API.get(
+          `/api/bug-reports/${reportId}/attachments/${attachment.id}/preview`,
+          {
+            params: { limit: 60000 },
+            responseType: "blob",
+          }
+        );
+        const blob = res.data;
+        const url = URL.createObjectURL(blob);
+        setPreviewBlobUrl(url);
+        setPreviewMimeType(blob?.type || mimeType || "application/octet-stream");
+      }
+    } catch (e) {
+      setPreviewError(e.response?.data?.error || "Failed to preview attachment");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleUploadAttachment = async (reportId) => {
+    const file = uploadFilesByReportId[reportId];
+    if (!file) return;
+
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await API.post(
+        `/api/bug-reports/${reportId}/attachments`,
+        formData,
+        { headers: { "Content-Type": "multipart/form-data" } }
+      );
+
+      if (res.data.success) {
+        // Clear local selection and refresh attachment metadata.
+        setUploadFilesByReportId((prev) => ({ ...prev, [reportId]: null }));
+        await loadAttachmentsForReport(reportId);
+      } else {
+        alert(res.data.error || "Failed to upload attachment");
+      }
+    } catch (e) {
+      alert(e.response?.data?.error || "Failed to upload attachment");
     }
   };
 
@@ -96,11 +238,18 @@ const ResearcherDashboard = ({ user }) => {
           <Wallet />
         </div>
 
+        <NotificationsWidget limit={5} />
+
         {/* Analytics Charts */}
         {analytics && (
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-blue-400 mb-4">Analytics</h2>
-            <AnalyticsCharts analytics={analytics} userRole="USER" />
+            <AnalyticsCharts
+              analytics={analytics}
+              userRole="USER"
+              range={analyticsRange}
+              onRangeChange={setAnalyticsRange}
+            />
           </div>
         )}
 
@@ -118,7 +267,7 @@ const ResearcherDashboard = ({ user }) => {
             <p className="text-2xl md:text-3xl font-bold text-white">{bugReports.length}</p>
             {analytics && analytics.totalRewardsPaid > 0 && (
               <p className="text-green-400 text-sm md:text-base mt-2">
-                Total Earned: ₹{(analytics.totalRewardsPaid * 83).toFixed(2)} (≈ ${analytics.totalRewardsPaid.toFixed(2)})
+                Total Earned: ₹{convertUSDToINR(analytics.totalRewardsPaid).toFixed(2)} (≈ ${analytics.totalRewardsPaid.toFixed(2)})
               </p>
             )}
           </div>
@@ -151,11 +300,108 @@ const ResearcherDashboard = ({ user }) => {
 
         <div>
           <h2 className="text-xl md:text-2xl font-bold mb-4 text-blue-400">My Bug Reports</h2>
-          <div className="space-y-4">
-            {bugReports.length === 0 ? (
-              <p className="text-gray-400 text-center py-8">No bug reports submitted yet.</p>
-            ) : (
-              bugReports.map((report) => (
+          {/* Search / Filters */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+            <div>
+              <label className="block text-gray-300 text-xs md:text-sm mb-1">
+                Search (title/desc)
+              </label>
+              <input
+                value={bugFilters.q}
+                onChange={(e) =>
+                  setBugFilters((prev) => ({ ...prev, q: e.target.value }))
+                }
+                placeholder="e.g. XSS"
+                className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:ring-2 focus:ring-blue-500 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-gray-300 text-xs md:text-sm mb-1">
+                Status
+              </label>
+              <select
+                value={bugFilters.status}
+                onChange={(e) =>
+                  setBugFilters((prev) => ({ ...prev, status: e.target.value }))
+                }
+                className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:ring-2 focus:ring-blue-500 text-sm"
+              >
+                <option value="">All</option>
+                <option value="PENDING">PENDING</option>
+                <option value="APPROVED">APPROVED</option>
+                <option value="REJECTED">REJECTED</option>
+                <option value="FIXED">FIXED</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-gray-300 text-xs md:text-sm mb-1">
+                Severity
+              </label>
+              <select
+                value={bugFilters.severity}
+                onChange={(e) =>
+                  setBugFilters((prev) => ({ ...prev, severity: e.target.value }))
+                }
+                className="w-full px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:ring-2 focus:ring-blue-500 text-sm"
+              >
+                <option value="">All</option>
+                <option value="CRITICAL">CRITICAL</option>
+                <option value="HIGH">HIGH</option>
+                <option value="MEDIUM">MEDIUM</option>
+                <option value="LOW">LOW</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 mb-3">
+            <button
+              onClick={() => {
+                setBugPage(0);
+                fetchMyBugReports({ page: 0 });
+              }}
+              className="px-3 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition text-sm"
+              disabled={bugLoading}
+            >
+              {bugLoading ? "Searching..." : "Apply"}
+            </button>
+            <button
+              onClick={() => {
+                setBugFilters({ q: "", status: "", severity: "" });
+                setBugPage(0);
+                fetchMyBugReports({ page: 0 });
+              }}
+              className="px-3 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg font-semibold transition text-sm"
+              disabled={bugLoading}
+            >
+              Clear
+            </button>
+
+            <div className="ml-auto flex items-center gap-2">
+              <label className="text-gray-300 text-xs md:text-sm">Page size</label>
+              <select
+                value={bugPageSize}
+                onChange={(e) => {
+                  const nextSize = parseInt(e.target.value, 10);
+                  setBugPageSize(nextSize);
+                  setBugPage(0);
+                }}
+                className="px-3 py-2 bg-gray-700 text-white rounded-lg border border-gray-600 focus:ring-2 focus:ring-blue-500 text-sm"
+                disabled={bugLoading}
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+              </select>
+            </div>
+          </div>
+
+          {bugLoading ? (
+            <p className="text-gray-300 text-sm">Loading...</p>
+          ) : bugReports.length === 0 ? (
+            <p className="text-gray-400 text-center py-8">No bug reports submitted yet.</p>
+          ) : (
+            <div className="space-y-4">
+              {bugReports.map((report) => (
                 <div
                   key={report.id}
                   className="bg-gray-800 p-4 md:p-6 rounded-lg border border-gray-700"
@@ -222,19 +468,145 @@ const ResearcherDashboard = ({ user }) => {
                   {report.rewardAmount && (
                     <div className="mb-4 p-3 bg-green-900/20 border border-green-700/50 rounded-lg">
                       <p className="text-green-400 font-bold text-sm md:text-base">
-                        Reward: ₹{(report.rewardAmount * 83).toFixed(2)} INR
+                        Reward: ₹{convertUSDToINR(report.rewardAmount).toFixed(2)} INR
                       </p>
                       <p className="text-green-300 text-xs md:text-sm">
                         ≈ ${report.rewardAmount.toFixed(2)} USD
                       </p>
                     </div>
                   )}
+
+                  {/* Attachments */}
+                  {attachmentsByReportId[report.id] && (
+                    <div className="mb-4">
+                      <div className="text-blue-400 font-semibold text-sm md:text-base mb-2">
+                        Attachments ({attachmentsByReportId[report.id].length})
+                      </div>
+                      {attachmentsByReportId[report.id].length > 0 && (
+                        <div className="flex flex-col gap-2">
+                          {attachmentsByReportId[report.id].map((att) => (
+                            <button
+                              key={att.id}
+                              onClick={() => openAttachmentPreview(report.id, att)}
+                              className="px-3 md:px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold transition text-xs md:text-sm text-left"
+                            >
+                              {att.name || "Attachment"}{" "}
+                              <span className="text-gray-400 font-normal">
+                                ({Math.round((att.size || 0) / 1024)} KB)
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Upload Attachment (reporter only) */}
+                  {String(report.reporterId) === String(user?.id) && (
+                    <div className="mb-4 p-3 bg-gray-700/40 border border-gray-600 rounded-lg">
+                      <div className="text-blue-400 font-semibold text-sm md:text-base mb-2">
+                        Add attachment
+                      </div>
+                      <input
+                        type="file"
+                        className="w-full text-sm md:text-base text-gray-300"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0] || null;
+                          setUploadFilesByReportId((prev) => ({ ...prev, [report.id]: f }));
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleUploadAttachment(report.id)}
+                        disabled={!uploadFilesByReportId[report.id]}
+                        className="mt-3 px-3 md:px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        Upload
+                      </button>
+                    </div>
+                  )}
                 </div>
-              ))
-            )}
+              ))}
+            </div>
+          )}
+
+          {/* Pagination */}
+          <div className="flex items-center justify-between mt-3 gap-3">
+            <button
+              onClick={() => {
+                if (bugPage > 0) {
+                  const nextPage = bugPage - 1;
+                  setBugPage(nextPage);
+                }
+              }}
+              className="px-3 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg font-semibold transition text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={bugPage <= 0 || bugLoading}
+            >
+              Prev
+            </button>
+            <div className="text-gray-300 text-sm whitespace-nowrap">
+              Page {bugMeta?.page ?? 0} / {bugMeta?.totalPages ?? 1} (Total: {bugMeta?.total ?? 0})
+            </div>
+            <button
+              onClick={() => {
+                const totalPages = bugMeta?.totalPages ?? 1;
+                if (bugPage < totalPages - 1) {
+                  const nextPage = bugPage + 1;
+                  setBugPage(nextPage);
+                }
+              }}
+              className="px-3 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg font-semibold transition text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={(bugMeta?.totalPages ?? 1) <= bugPage + 1 || bugLoading}
+            >
+              Next
+            </button>
           </div>
         </div>
       </div>
+
+      {/* Preview Modal */}
+      {previewOpen && (
+        <div className="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 p-4">
+          <div className="bg-gray-800 rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between gap-4 mb-4">
+              <div>
+                <h3 className="text-xl font-bold text-blue-400">{previewTitle}</h3>
+                {previewError && <p className="text-red-400 text-sm mt-2">{previewError}</p>}
+              </div>
+              <button
+                onClick={closePreview}
+                className="text-gray-300 hover:text-white text-sm md:text-base"
+              >
+                Close
+              </button>
+            </div>
+
+            {previewLoading ? (
+              <div className="text-gray-300 text-sm md:text-base">Loading preview...</div>
+            ) : previewText ? (
+              <pre className="bg-black rounded border border-gray-700 p-3 font-mono text-xs md:text-sm text-green-400 whitespace-pre-wrap overflow-x-auto">
+                {previewText}
+              </pre>
+            ) : previewBlobUrl ? (
+              previewMimeType && previewMimeType.startsWith("image/") ? (
+                <img
+                  src={previewBlobUrl}
+                  alt="preview"
+                  className="max-w-full rounded border border-gray-700"
+                />
+              ) : (
+                <iframe
+                  src={previewBlobUrl}
+                  title="attachment-preview"
+                  className="w-full h-[70vh] rounded border border-gray-700 bg-black"
+                />
+              )
+            ) : (
+              <div className="text-gray-300 text-sm md:text-base">No preview available.</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

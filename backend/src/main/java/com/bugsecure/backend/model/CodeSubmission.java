@@ -13,7 +13,13 @@ public class CodeSubmission {
     private String title;
     private String description;
     private String fileName; // Optional - can be empty if code is pasted directly
+    // Legacy: persisted code content for older records.
     private String codeContent;
+
+    // Secure storage for code bytes. New submissions should prefer these.
+    private String codeStorageKey;
+    private String codeMimeType; // e.g., text/plain
+    private Long codeSizeBytes;
     private String status = "OPEN"; // OPEN, IN_PROGRESS, CLOSED
     private Double rewardAmount;
     private String website; // Website URL for testing
@@ -89,6 +95,30 @@ public class CodeSubmission {
 
     public void setCodeContent(String codeContent) {
         this.codeContent = codeContent;
+    }
+
+    public String getCodeStorageKey() {
+        return codeStorageKey;
+    }
+
+    public void setCodeStorageKey(String codeStorageKey) {
+        this.codeStorageKey = codeStorageKey;
+    }
+
+    public String getCodeMimeType() {
+        return codeMimeType;
+    }
+
+    public void setCodeMimeType(String codeMimeType) {
+        this.codeMimeType = codeMimeType;
+    }
+
+    public Long getCodeSizeBytes() {
+        return codeSizeBytes;
+    }
+
+    public void setCodeSizeBytes(Long codeSizeBytes) {
+        this.codeSizeBytes = codeSizeBytes;
     }
 
     public String getStatus() {

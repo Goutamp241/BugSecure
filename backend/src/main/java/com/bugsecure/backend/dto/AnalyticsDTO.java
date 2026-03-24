@@ -19,6 +19,11 @@ public class AnalyticsDTO {
     private List<Map<String, Object>> topResearchers;
     private List<Map<String, Object>> topCompanies;
 
+    // Phase 5 (filtered analytics)
+    private List<Map<String, Object>> earningsByPeriod; // Line chart: money added over time
+    private List<Map<String, Object>> bugsSubmittedVsAcceptedByPeriod; // Bar chart: submitted vs accepted
+    private List<Map<String, Object>> userEarningsPie; // Pie chart: user earnings distribution
+
     // Getters and Setters
     public Long getTotalSubmissions() {
         return totalSubmissions;
@@ -130,6 +135,30 @@ public class AnalyticsDTO {
 
     public void setTopCompanies(List<Map<String, Object>> topCompanies) {
         this.topCompanies = topCompanies;
+    }
+
+    public List<Map<String, Object>> getEarningsByPeriod() {
+        return earningsByPeriod;
+    }
+
+    public void setEarningsByPeriod(List<Map<String, Object>> earningsByPeriod) {
+        this.earningsByPeriod = earningsByPeriod;
+    }
+
+    public List<Map<String, Object>> getBugsSubmittedVsAcceptedByPeriod() {
+        return bugsSubmittedVsAcceptedByPeriod;
+    }
+
+    public void setBugsSubmittedVsAcceptedByPeriod(List<Map<String, Object>> bugsSubmittedVsAcceptedByPeriod) {
+        this.bugsSubmittedVsAcceptedByPeriod = bugsSubmittedVsAcceptedByPeriod;
+    }
+
+    public List<Map<String, Object>> getUserEarningsPie() {
+        return userEarningsPie;
+    }
+
+    public void setUserEarningsPie(List<Map<String, Object>> userEarningsPie) {
+        this.userEarningsPie = userEarningsPie;
     }
 }
 
