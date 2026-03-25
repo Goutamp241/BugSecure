@@ -8,6 +8,7 @@ import RegisterForm from "./components/RegisterForm";
 import Dashboard from "./components/Dashboard";
 import PaymentsPage from "./pages/PaymentsPage";
 import ProfilePage from "./pages/ProfilePage";
+import SandboxEnvironment from "./pages/SandboxEnvironment";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import AboutUs from "./pages/AboutUs";
 import ContactUs from "./pages/ContactUs";
@@ -36,6 +37,7 @@ const AppRoutes = () => {
           <Route path="/payments" element={<PaymentsPageWrapper />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/profile/:id" element={<ProfilePage />} />
+          <Route path="/sandbox/:sandboxId" element={<SandboxEnvironment />} />
         </Routes>
       </motion.div>
     </AnimatePresence>

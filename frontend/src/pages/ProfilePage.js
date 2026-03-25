@@ -27,6 +27,8 @@ const ProfilePage = () => {
     confirmPassword: "",
   });
   const [showPasswordForm, setShowPasswordForm] = useState(false);
+  const [contractAgreeChecked, setContractAgreeChecked] = useState(false);
+  const [contractAcceptLoading, setContractAcceptLoading] = useState(false);
   const navigate = useNavigate();
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
   const isOwnProfile = !id || id === currentUser.id?.toString();
@@ -105,6 +107,50 @@ const ProfilePage = () => {
       setError("Failed to load profile");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAcceptSmartContract = async () => {
+    if (!contractAgreeChecked) return;
+
+    setContractAcceptLoading(true);
+    setError("");
+    try {
+      const contractText =
+        "Terms and Conditions for Bug Bounty Researchers: "
+        + "You agree to conduct security testing only on authorized targets and within the scope defined by the company. "
+        + "You will not access, modify, or delete data beyond what is necessary to demonstrate the vulnerability. "
+        + "You will not disclose vulnerabilities publicly before the company has had reasonable time to fix them. "
+        + "You will not perform any denial of service attacks or actions that could harm the company's infrastructure. "
+        + "You agree to comply with all applicable laws and regulations. ";
+
+      const res = await API.post("/api/contract/accept", { contractText });
+      if (!res.data?.success) {
+        throw new Error(res.data?.error || "Failed to accept contract");
+      }
+
+      // Update local state + localStorage so researchers immediately see preview/sandbox buttons.
+      const updatedProfile = {
+        ...(profile || {}),
+        contractAccepted: true,
+        contractHash: res.data.contractHash,
+      };
+      setProfile(updatedProfile);
+
+      if (currentUser?.id) {
+        const updatedUser = {
+          ...currentUser,
+          contractAccepted: true,
+          contractHash: res.data.contractHash,
+        };
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+      }
+
+      setContractAgreeChecked(false);
+      setContractAcceptLoading(false);
+    } catch (e) {
+      setError(e.response?.data?.error || e.message || "Failed to accept contract");
+      setContractAcceptLoading(false);
     }
   };
 
@@ -304,6 +350,38 @@ const ProfilePage = () => {
           {error && (
             <div className="bg-red-600 text-white p-3 rounded mb-4">{error}</div>
           )}
+
+          {/* Researchers must accept the smart contract to unlock code preview/sandbox testing */}
+          {profile?.role === "USER" &&
+            isOwnProfile &&
+            !isEditing &&
+            !profile?.contractAccepted && (
+              <div className="mb-6 p-4 bg-gray-900 rounded-lg border border-yellow-500/50">
+                <h2 className="text-xl font-bold text-yellow-300 mb-2">
+                  Smart Contract Required
+                </h2>
+                <p className="text-gray-300 text-sm mb-3">
+                  Accepting the contract is required to preview submitted code and start sandbox testing.
+                </p>
+                <label className="flex items-center gap-2 text-gray-300 text-sm mb-4">
+                  <input
+                    type="checkbox"
+                    checked={contractAgreeChecked}
+                    onChange={(e) => setContractAgreeChecked(e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  I have read and agree to the terms and conditions.
+                </label>
+                <button
+                  type="button"
+                  onClick={handleAcceptSmartContract}
+                  disabled={!contractAgreeChecked || contractAcceptLoading}
+                  className="px-6 py-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {contractAcceptLoading ? "Accepting..." : "Accept Contract"}
+                </button>
+              </div>
+            )}
 
           {avatarPickerOpen && isOwnProfile && (
             <MemojiAvatarPicker

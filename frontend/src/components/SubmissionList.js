@@ -15,6 +15,14 @@ const SubmissionList = ({ submissions, onUpdate, onViewBugReports, isCompanyView
     currentUser?.role === "COMPANY" ||
     (currentUser?.role === "USER" && currentUser?.contractAccepted);
 
+  const canStartSandbox =
+    !isCompanyView &&
+    (currentUser?.role === "ADMIN" || (currentUser?.role === "USER" && currentUser?.contractAccepted));
+
+  // Active sandbox per submission (simple 1:1 mapping for UX).
+  const [activeSandboxBySubmissionId, setActiveSandboxBySubmissionId] = useState({});
+  const [sandboxLoadingBySubmissionId, setSandboxLoadingBySubmissionId] = useState({});
+
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewTitle, setPreviewTitle] = useState("");
   const [previewText, setPreviewText] = useState("");
@@ -137,6 +145,63 @@ const SubmissionList = ({ submissions, onUpdate, onViewBugReports, isCompanyView
     }
   };
 
+  const handleStartSandbox = async (submissionId) => {
+    if (!canStartSandbox) return;
+
+    setSandboxLoadingBySubmissionId((prev) => ({ ...prev, [submissionId]: true }));
+    try {
+      const res = await API.post(`/api/sandbox/start/${submissionId}`);
+      if (res.data?.success) {
+        const sandboxData = res.data?.data || {};
+        const { sandboxId, url } = sandboxData;
+
+        if (sandboxId) {
+          navigate(`/sandbox/${sandboxId}`);
+        } else if (url) {
+          // Backwards fallback: open returned URL directly.
+          window.open(url, "_blank", "noopener,noreferrer");
+        } else {
+          alert("Sandbox started but neither sandboxId nor URL were returned.");
+        }
+
+        if (sandboxId) {
+          setActiveSandboxBySubmissionId((prev) => ({ ...prev, [submissionId]: sandboxId }));
+        }
+      } else {
+        alert(res.data?.error || "Failed to start sandbox");
+      }
+    } catch (e) {
+      alert(e?.response?.data?.error || "Failed to start sandbox");
+    } finally {
+      setSandboxLoadingBySubmissionId((prev) => ({ ...prev, [submissionId]: false }));
+    }
+  };
+
+  const handleStopSandbox = async (submissionId) => {
+    if (!canStartSandbox) return;
+
+    const sandboxId = activeSandboxBySubmissionId?.[submissionId];
+    if (!sandboxId) return;
+
+    setSandboxLoadingBySubmissionId((prev) => ({ ...prev, [submissionId]: true }));
+    try {
+      const res = await API.delete(`/api/sandbox/stop/${sandboxId}`);
+      if (res.data?.success) {
+        setActiveSandboxBySubmissionId((prev) => {
+          const next = { ...prev };
+          delete next[submissionId];
+          return next;
+        });
+      } else {
+        alert(res.data?.error || "Failed to stop sandbox");
+      }
+    } catch (e) {
+      alert(e?.response?.data?.error || "Failed to stop sandbox");
+    } finally {
+      setSandboxLoadingBySubmissionId((prev) => ({ ...prev, [submissionId]: false }));
+    }
+  };
+
   if (submissions.length === 0) {
     return (
       <div className="bg-gray-800 p-6 rounded-lg border border-gray-700">
@@ -233,6 +298,28 @@ const SubmissionList = ({ submissions, onUpdate, onViewBugReports, isCompanyView
                     Preview Code
                   </button>
                 </div>
+
+                  {canStartSandbox && (
+                    <div className="flex flex-wrap gap-2">
+                      {activeSandboxBySubmissionId?.[submission.id] ? (
+                        <button
+                          onClick={() => handleStopSandbox(submission.id)}
+                          disabled={sandboxLoadingBySubmissionId?.[submission.id]}
+                          className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg font-semibold transition text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {sandboxLoadingBySubmissionId?.[submission.id] ? "Stopping..." : "Stop Testing"}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => handleStartSandbox(submission.id)}
+                          disabled={sandboxLoadingBySubmissionId?.[submission.id]}
+                          className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg font-semibold transition text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {sandboxLoadingBySubmissionId?.[submission.id] ? "Starting..." : "Start Testing"}
+                        </button>
+                      )}
+                    </div>
+                  )}
 
                 {submission.files && submission.files.length > 0 && (
                   <details>
