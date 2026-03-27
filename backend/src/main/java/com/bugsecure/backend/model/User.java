@@ -23,6 +23,8 @@ public class User {
     // Wallet fields
     private String walletAddress;   // Unique wallet identifier
     private Double balance = 0.0;   // Current wallet balance
+    // Preferred display currency for wallet/UI (balance is stored in USD as single source of truth)
+    private String currency = "USD";   // USD, INR, EUR
     private Boolean contractAccepted = false;   // Smart contract acceptance (for researchers)
     private String contractHash;   // Contract signature/hash (for researchers)
     private java.time.LocalDateTime contractAcceptedAt;   // When contract was accepted (for researchers)
@@ -147,6 +149,14 @@ public class User {
 
     public void setBalance(Double balance) {
         this.balance = balance;
+    }
+
+    public String getCurrency() {
+        return currency;
+    }
+
+    public void setCurrency(String currency) {
+        this.currency = currency;
     }
 
     public Boolean getContractAccepted() {

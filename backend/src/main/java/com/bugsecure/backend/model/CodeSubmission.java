@@ -4,6 +4,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.DBRef;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Document(collection = "code_submissions")
 public class CodeSubmission {
@@ -25,6 +26,37 @@ public class CodeSubmission {
     private String website; // Website URL for testing
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
+    // =============================
+    // Bug bounty program settings
+    // =============================
+    // Scope
+    private List<String> inScopeTargets;
+    private List<String> outOfScopeTargets;
+
+    // Allowed / restricted testing
+    private List<String> allowedTestingTypes;
+    private List<String> restrictedActions;
+
+    // Reward structure (critical is mapped to `rewardAmount` for compatibility)
+    private Double rewardLowSeverity;
+    private Double rewardMediumSeverity;
+    private Double rewardHighSeverity;
+    private Double rewardCriticalSeverity;
+
+    private String environmentSetting; // Staging / Production / Code Only
+    private LocalDateTime programStartAt;
+    private LocalDateTime programEndAt;
+    private String accessControl; // Public / Invite Only / Limited Researchers
+
+    // Testing credentials (optional)
+    private String testingCredentialsEmail;
+    // For production, store a password hash (not plaintext). UI may send plaintext for now.
+    private String testingCredentialsPasswordHash;
+
+    // Legal agreement
+    private Boolean agreedDisclosure;
+    private Boolean agreedNoHarm;
     
     @DBRef
     private User company;
@@ -159,6 +191,134 @@ public class CodeSubmission {
 
     public void setUpdatedAt(LocalDateTime updatedAt) {
         this.updatedAt = updatedAt;
+    }
+
+    public List<String> getInScopeTargets() {
+        return inScopeTargets;
+    }
+
+    public void setInScopeTargets(List<String> inScopeTargets) {
+        this.inScopeTargets = inScopeTargets;
+    }
+
+    public List<String> getOutOfScopeTargets() {
+        return outOfScopeTargets;
+    }
+
+    public void setOutOfScopeTargets(List<String> outOfScopeTargets) {
+        this.outOfScopeTargets = outOfScopeTargets;
+    }
+
+    public List<String> getAllowedTestingTypes() {
+        return allowedTestingTypes;
+    }
+
+    public void setAllowedTestingTypes(List<String> allowedTestingTypes) {
+        this.allowedTestingTypes = allowedTestingTypes;
+    }
+
+    public List<String> getRestrictedActions() {
+        return restrictedActions;
+    }
+
+    public void setRestrictedActions(List<String> restrictedActions) {
+        this.restrictedActions = restrictedActions;
+    }
+
+    public Double getRewardLowSeverity() {
+        return rewardLowSeverity;
+    }
+
+    public void setRewardLowSeverity(Double rewardLowSeverity) {
+        this.rewardLowSeverity = rewardLowSeverity;
+    }
+
+    public Double getRewardMediumSeverity() {
+        return rewardMediumSeverity;
+    }
+
+    public void setRewardMediumSeverity(Double rewardMediumSeverity) {
+        this.rewardMediumSeverity = rewardMediumSeverity;
+    }
+
+    public Double getRewardHighSeverity() {
+        return rewardHighSeverity;
+    }
+
+    public void setRewardHighSeverity(Double rewardHighSeverity) {
+        this.rewardHighSeverity = rewardHighSeverity;
+    }
+
+    public Double getRewardCriticalSeverity() {
+        return rewardCriticalSeverity;
+    }
+
+    public void setRewardCriticalSeverity(Double rewardCriticalSeverity) {
+        this.rewardCriticalSeverity = rewardCriticalSeverity;
+    }
+
+    public String getEnvironmentSetting() {
+        return environmentSetting;
+    }
+
+    public void setEnvironmentSetting(String environmentSetting) {
+        this.environmentSetting = environmentSetting;
+    }
+
+    public LocalDateTime getProgramStartAt() {
+        return programStartAt;
+    }
+
+    public void setProgramStartAt(LocalDateTime programStartAt) {
+        this.programStartAt = programStartAt;
+    }
+
+    public LocalDateTime getProgramEndAt() {
+        return programEndAt;
+    }
+
+    public void setProgramEndAt(LocalDateTime programEndAt) {
+        this.programEndAt = programEndAt;
+    }
+
+    public String getAccessControl() {
+        return accessControl;
+    }
+
+    public void setAccessControl(String accessControl) {
+        this.accessControl = accessControl;
+    }
+
+    public String getTestingCredentialsEmail() {
+        return testingCredentialsEmail;
+    }
+
+    public void setTestingCredentialsEmail(String testingCredentialsEmail) {
+        this.testingCredentialsEmail = testingCredentialsEmail;
+    }
+
+    public String getTestingCredentialsPasswordHash() {
+        return testingCredentialsPasswordHash;
+    }
+
+    public void setTestingCredentialsPasswordHash(String testingCredentialsPasswordHash) {
+        this.testingCredentialsPasswordHash = testingCredentialsPasswordHash;
+    }
+
+    public Boolean getAgreedDisclosure() {
+        return agreedDisclosure;
+    }
+
+    public void setAgreedDisclosure(Boolean agreedDisclosure) {
+        this.agreedDisclosure = agreedDisclosure;
+    }
+
+    public Boolean getAgreedNoHarm() {
+        return agreedNoHarm;
+    }
+
+    public void setAgreedNoHarm(Boolean agreedNoHarm) {
+        this.agreedNoHarm = agreedNoHarm;
     }
 
     public User getCompany() {

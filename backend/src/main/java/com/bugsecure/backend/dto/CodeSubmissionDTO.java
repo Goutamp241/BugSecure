@@ -17,6 +17,30 @@ public class CodeSubmissionDTO {
     private String website; // Website URL for testing
     private List<Map<String, Object>> files; // List of file objects
 
+    // =============================
+    // Bug bounty program settings
+    // =============================
+    private List<String> inScopeTargets;
+    private List<String> outOfScopeTargets;
+    private List<String> allowedTestingTypes;
+    private List<String> restrictedActions;
+
+    private Double rewardLowSeverity;
+    private Double rewardMediumSeverity;
+    private Double rewardHighSeverity;
+    private Double rewardCriticalSeverity;
+
+    private String environmentSetting;
+    private String startDate; // YYYY-MM-DD from UI
+    private String endDate; // YYYY-MM-DD from UI
+    private String accessControl;
+
+    private String testingEmail;
+    private String testingPassword;
+
+    private Boolean agreedDisclosure;
+    private Boolean agreedNoHarm;
+
     // Constructors
     public CodeSubmissionDTO() {
     }
@@ -116,6 +140,134 @@ public class CodeSubmissionDTO {
 
     public void setFiles(List<Map<String, Object>> files) {
         this.files = files;
+    }
+
+    public List<String> getInScopeTargets() {
+        return inScopeTargets;
+    }
+
+    public void setInScopeTargets(List<String> inScopeTargets) {
+        this.inScopeTargets = inScopeTargets;
+    }
+
+    public List<String> getOutOfScopeTargets() {
+        return outOfScopeTargets;
+    }
+
+    public void setOutOfScopeTargets(List<String> outOfScopeTargets) {
+        this.outOfScopeTargets = outOfScopeTargets;
+    }
+
+    public List<String> getAllowedTestingTypes() {
+        return allowedTestingTypes;
+    }
+
+    public void setAllowedTestingTypes(List<String> allowedTestingTypes) {
+        this.allowedTestingTypes = allowedTestingTypes;
+    }
+
+    public List<String> getRestrictedActions() {
+        return restrictedActions;
+    }
+
+    public void setRestrictedActions(List<String> restrictedActions) {
+        this.restrictedActions = restrictedActions;
+    }
+
+    public Double getRewardLowSeverity() {
+        return rewardLowSeverity;
+    }
+
+    public void setRewardLowSeverity(Double rewardLowSeverity) {
+        this.rewardLowSeverity = rewardLowSeverity;
+    }
+
+    public Double getRewardMediumSeverity() {
+        return rewardMediumSeverity;
+    }
+
+    public void setRewardMediumSeverity(Double rewardMediumSeverity) {
+        this.rewardMediumSeverity = rewardMediumSeverity;
+    }
+
+    public Double getRewardHighSeverity() {
+        return rewardHighSeverity;
+    }
+
+    public void setRewardHighSeverity(Double rewardHighSeverity) {
+        this.rewardHighSeverity = rewardHighSeverity;
+    }
+
+    public Double getRewardCriticalSeverity() {
+        return rewardCriticalSeverity;
+    }
+
+    public void setRewardCriticalSeverity(Double rewardCriticalSeverity) {
+        this.rewardCriticalSeverity = rewardCriticalSeverity;
+    }
+
+    public String getEnvironmentSetting() {
+        return environmentSetting;
+    }
+
+    public void setEnvironmentSetting(String environmentSetting) {
+        this.environmentSetting = environmentSetting;
+    }
+
+    public String getStartDate() {
+        return startDate;
+    }
+
+    public void setStartDate(String startDate) {
+        this.startDate = startDate;
+    }
+
+    public String getEndDate() {
+        return endDate;
+    }
+
+    public void setEndDate(String endDate) {
+        this.endDate = endDate;
+    }
+
+    public String getAccessControl() {
+        return accessControl;
+    }
+
+    public void setAccessControl(String accessControl) {
+        this.accessControl = accessControl;
+    }
+
+    public String getTestingEmail() {
+        return testingEmail;
+    }
+
+    public void setTestingEmail(String testingEmail) {
+        this.testingEmail = testingEmail;
+    }
+
+    public String getTestingPassword() {
+        return testingPassword;
+    }
+
+    public void setTestingPassword(String testingPassword) {
+        this.testingPassword = testingPassword;
+    }
+
+    public Boolean getAgreedDisclosure() {
+        return agreedDisclosure;
+    }
+
+    public void setAgreedDisclosure(Boolean agreedDisclosure) {
+        this.agreedDisclosure = agreedDisclosure;
+    }
+
+    public Boolean getAgreedNoHarm() {
+        return agreedNoHarm;
+    }
+
+    public void setAgreedNoHarm(Boolean agreedNoHarm) {
+        this.agreedNoHarm = agreedNoHarm;
     }
 }
 

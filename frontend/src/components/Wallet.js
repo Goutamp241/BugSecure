@@ -6,6 +6,7 @@ const Wallet = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [user, setUser] = useState(null);
+  const [selectedCurrency, setSelectedCurrency] = useState("USD");
   const [showDeposit, setShowDeposit] = useState(false);
   const [showWithdraw, setShowWithdraw] = useState(false);
   const [showCompanyAgreement, setShowCompanyAgreement] = useState(false);
@@ -31,11 +32,45 @@ const Wallet = () => {
       const res = await API.get("/api/wallet");
       if (res.data.success) {
         setWallet(res.data.data);
+        setSelectedCurrency(res.data.data?.currency || "USD");
       }
     } catch (err) {
       setError(err.response?.data?.error || "Failed to load wallet");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const currencySymbol = (c) => {
+    const cc = (c || "USD").toUpperCase();
+    if (cc === "INR") return "₹";
+    if (cc === "EUR") return "€";
+    return "$";
+  };
+
+  const convertFromUsd = (amountUsd, c) => {
+    const cc = (c || "USD").toUpperCase();
+    const rates = { USD: 1, INR: 83, EUR: 0.92 };
+    const r = rates[cc] || 1;
+    return (amountUsd || 0) * r;
+  };
+
+  const formatMoney = (amountUsd, c) => {
+    const cc = (c || "USD").toUpperCase();
+    const v = convertFromUsd(amountUsd, cc);
+    return `${currencySymbol(cc)}${Number(v).toFixed(2)}`;
+  };
+
+  const handleChangeCurrency = async (currency) => {
+    setSelectedCurrency(currency);
+    try {
+      const res = await API.post("/api/wallet/currency", { currency });
+      if (res.data?.success) {
+        setWallet(res.data.data);
+        setSelectedCurrency(res.data.data?.currency || currency);
+      }
+    } catch (err) {
+      setError(err.response?.data?.error || "Failed to update currency");
     }
   };
 
@@ -52,6 +87,7 @@ const Wallet = () => {
     try {
       const res = await API.post("/api/wallet/deposit", {
         amount: parseFloat(amount),
+        currency: selectedCurrency,
         description: description || "Wallet deposit",
         paymentMethod: paymentMethod,
       });
@@ -158,6 +194,7 @@ const Wallet = () => {
     try {
       const res = await API.post("/api/wallet/withdraw", {
         amount: parseFloat(amount),
+        currency: selectedCurrency,
         description: description || `Wallet withdrawal via ${paymentMethod}`,
         withdrawalMethod: paymentMethod,
         withdrawalReference: withdrawalReference,
@@ -207,9 +244,21 @@ const Wallet = () => {
               <div className="text-right">
                 <p className="text-gray-400 text-sm">Balance</p>
                 <p className="text-3xl font-bold text-green-400">
-                  ${wallet.balance?.toFixed(2) || "0.00"}
+                  {formatMoney(wallet.balance, selectedCurrency)}
                 </p>
               </div>
+            </div>
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <div className="text-gray-400 text-sm">Currency</div>
+              <select
+                value={selectedCurrency}
+                onChange={(e) => handleChangeCurrency(e.target.value)}
+                className="bg-gray-800 text-white border border-gray-600 rounded-lg px-3 py-2 text-sm"
+              >
+                <option value="USD">USD ($)</option>
+                <option value="INR">INR (₹)</option>
+                <option value="EUR">EUR (€)</option>
+              </select>
             </div>
           </div>
 
@@ -248,7 +297,7 @@ const Wallet = () => {
                 <h3 className="text-xl font-bold text-blue-400 mb-4">Add Funds to Wallet</h3>
                 <form onSubmit={handleDeposit}>
                   <div className="mb-4">
-                    <label className="block mb-2 text-gray-300">Amount (USD)</label>
+                    <label className="block mb-2 text-gray-300">Amount ({selectedCurrency})</label>
                     <input
                       type="number"
                       step="0.01"
@@ -314,19 +363,19 @@ const Wallet = () => {
                 <h3 className="text-xl font-bold text-blue-400 mb-4">Withdraw Funds</h3>
                 <form onSubmit={handleWithdraw}>
                   <div className="mb-4">
-                    <label className="block mb-2 text-gray-300">Amount (USD)</label>
+                    <label className="block mb-2 text-gray-300">Amount ({selectedCurrency})</label>
                     <input
                       type="number"
                       step="0.01"
                       min="0.01"
-                      max={wallet?.balance || 0}
+                      max={convertFromUsd(wallet?.balance || 0, selectedCurrency)}
                       className="w-full p-3 rounded-lg bg-gray-700 text-white"
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
                       required
                     />
                     <p className="text-gray-400 text-xs mt-1">
-                      Available: ${wallet?.balance?.toFixed(2) || "0.00"}
+                      Available: {formatMoney(wallet?.balance || 0, selectedCurrency)}
                     </p>
                   </div>
                   
@@ -569,7 +618,7 @@ const Wallet = () => {
                         {tx.transactionType === "DEPOSIT" || tx.transactionType === "REWARD"
                           ? "+"
                           : "-"}
-                        ${tx.amount?.toFixed(2)}
+                        {currencySymbol(tx.currency)}{tx.amount?.toFixed(2)}
                       </p>
                       <p className="text-gray-400 text-xs">{tx.status}</p>
                     </div>

@@ -8,6 +8,9 @@ import RegisterForm from "./components/RegisterForm";
 import Dashboard from "./components/Dashboard";
 import PaymentsPage from "./pages/PaymentsPage";
 import ProfilePage from "./pages/ProfilePage";
+import SandboxEnvironment from "./pages/SandboxEnvironment";
+import TestingPanel from "./pages/TestingPanel";
+import BugSubmissionPage from "./pages/BugSubmissionPage";
 import ForgotPasswordPage from "./pages/ForgotPasswordPage";
 import AboutUs from "./pages/AboutUs";
 import ContactUs from "./pages/ContactUs";
@@ -36,6 +39,9 @@ const AppRoutes = () => {
           <Route path="/payments" element={<PaymentsPageWrapper />} />
           <Route path="/profile" element={<ProfilePage />} />
           <Route path="/profile/:id" element={<ProfilePage />} />
+          <Route path="/sandbox/:sandboxId" element={<SandboxEnvironment />} />
+          <Route path="/testing/:submissionId" element={<TestingPanel />} />
+          <Route path="/bug-submit/:submissionId" element={<BugSubmissionPage />} />
         </Routes>
       </motion.div>
     </AnimatePresence>

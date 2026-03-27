@@ -14,6 +14,9 @@ const ResearcherDashboard = ({ user }) => {
   const [analytics, setAnalytics] = useState(null);
   const [analyticsRange, setAnalyticsRange] = useState("monthly");
   const [sortBy, setSortBy] = useState("");
+  const [contractAccepted, setContractAccepted] = useState(!!user?.contractAccepted);
+  const [contractAgreeChecked, setContractAgreeChecked] = useState(false);
+  const [contractAcceptLoading, setContractAcceptLoading] = useState(false);
   const [bugFilters, setBugFilters] = useState({
     q: "",
     status: "",
@@ -34,6 +37,10 @@ const ResearcherDashboard = ({ user }) => {
   const [previewMimeType, setPreviewMimeType] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
+
+  useEffect(() => {
+    setContractAccepted(!!user?.contractAccepted);
+  }, [user?.contractAccepted]);
 
   useEffect(() => {
     fetchSubmissions();
@@ -111,6 +118,40 @@ const ResearcherDashboard = ({ user }) => {
       }
     } catch (e) {
       console.error("Failed to load attachments:", e);
+    }
+  };
+
+  const handleAcceptSmartContract = async () => {
+    if (!contractAgreeChecked) return;
+    setContractAcceptLoading(true);
+
+    try {
+      const contractText =
+        "Terms and Conditions for Bug Bounty Researchers: " +
+        "You agree to conduct security testing only on authorized targets and within the scope defined by the company. " +
+        "You will not access, modify, or delete data beyond what is necessary to demonstrate the vulnerability. " +
+        "You will not disclose vulnerabilities publicly before the company has had reasonable time to fix them. " +
+        "You will not perform any denial of service attacks or actions that could harm the company's infrastructure. " +
+        "You agree to comply with all applicable laws and regulations.";
+
+      const res = await API.post("/api/contract/accept", { contractText });
+      if (!res.data?.success) {
+        throw new Error(res.data?.error || "Failed to accept contract");
+      }
+
+      // Update localStorage + local state so SubmissionList re-renders and reveals Preview/Sandbox.
+      const updatedUser = {
+        ...(JSON.parse(localStorage.getItem("user") || "{}") || {}),
+        contractAccepted: true,
+        contractHash: res.data.contractHash,
+      };
+      localStorage.setItem("user", JSON.stringify(updatedUser));
+      setContractAccepted(true);
+      setContractAgreeChecked(false);
+    } catch (e) {
+      alert(e?.response?.data?.error || e?.message || "Failed to accept contract");
+    } finally {
+      setContractAcceptLoading(false);
     }
   };
 
@@ -250,6 +291,32 @@ const ResearcherDashboard = ({ user }) => {
               range={analyticsRange}
               onRangeChange={setAnalyticsRange}
             />
+          </div>
+        )}
+
+        {!contractAccepted && (
+          <div className="mb-6 p-4 bg-gray-900 rounded-lg border border-yellow-500/50">
+            <h2 className="text-xl font-bold text-yellow-300 mb-2">Smart Contract Required</h2>
+            <p className="text-gray-300 text-sm mb-3">
+              Accept the contract to unlock code preview and sandbox testing.
+            </p>
+            <label className="flex items-center gap-2 text-gray-300 text-sm mb-4">
+              <input
+                type="checkbox"
+                checked={contractAgreeChecked}
+                onChange={(e) => setContractAgreeChecked(e.target.checked)}
+                className="w-4 h-4"
+              />
+              I have read and agree to the terms and conditions.
+            </label>
+            <button
+              type="button"
+              onClick={handleAcceptSmartContract}
+              disabled={!contractAgreeChecked || contractAcceptLoading}
+              className="px-6 py-2 bg-yellow-600 hover:bg-yellow-700 rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {contractAcceptLoading ? "Accepting..." : "Accept Contract"}
+            </button>
           </div>
         )}
 

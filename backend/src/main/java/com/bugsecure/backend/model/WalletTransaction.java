@@ -14,6 +14,8 @@ public class WalletTransaction {
     private Double amount;
     private String currency = "USD"; // USD, INR, etc.
     private String status = "PENDING"; // PENDING, COMPLETED, FAILED
+    // Canonical amount in USD for ledger consistency (optional, used for multi-currency requests)
+    private Double amountUsd;
     private String description;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
@@ -89,6 +91,14 @@ public class WalletTransaction {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public Double getAmountUsd() {
+        return amountUsd;
+    }
+
+    public void setAmountUsd(Double amountUsd) {
+        this.amountUsd = amountUsd;
     }
 
     public String getDescription() {

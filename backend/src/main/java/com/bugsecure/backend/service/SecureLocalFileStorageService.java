@@ -1,8 +1,6 @@
 package com.bugsecure.backend.service;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ByteArrayResource;
-import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -27,6 +25,10 @@ public class SecureLocalFileStorageService {
 
     @Value("${file.storage.root:./secure_uploads}")
     private String fileStorageRoot;
+
+    // Legacy root used by older records / earlier deployments.
+    @Value("${file.storage.legacy-root:./uploads}")
+    private String fileStorageLegacyRoot;
 
     public static class StoredFile {
         private final String storageKey;
@@ -90,11 +92,35 @@ public class SecureLocalFileStorageService {
 
     public byte[] readBytes(String storageKey) {
         try {
+            if (storageKey == null || storageKey.isBlank()) {
+                return new byte[0];
+            }
+
             Path root = Paths.get(fileStorageRoot).toAbsolutePath().normalize();
+            Path legacyRoot = Paths.get(fileStorageLegacyRoot).toAbsolutePath().normalize();
+
+            Path storagePath = Paths.get(storageKey);
+
+            // Some historical records may contain absolute paths.
+            // For safety, only allow reading from our configured roots.
+            if (storagePath.isAbsolute()) {
+                Path abs = storagePath.toAbsolutePath().normalize();
+                if (abs.startsWith(root) || abs.startsWith(legacyRoot)) {
+                    return Files.readAllBytes(abs);
+                }
+                throw new RuntimeException("Invalid storage key (outside allowed roots)");
+            }
+
             Path target = root.resolve(storageKey).normalize();
             if (!target.startsWith(root)) {
+                // Fallback to legacy root for older persisted keys.
+                Path legacyTarget = legacyRoot.resolve(storageKey).normalize();
+                if (legacyTarget.startsWith(legacyRoot)) {
+                    return Files.readAllBytes(legacyTarget);
+                }
                 throw new RuntimeException("Invalid storage key");
             }
+
             return Files.readAllBytes(target);
         } catch (IOException e) {
             throw new RuntimeException("Failed to read file: " + e.getMessage());
