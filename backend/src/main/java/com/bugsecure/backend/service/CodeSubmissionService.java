@@ -12,6 +12,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.format.DateTimeFormatter;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -87,11 +88,43 @@ public class CodeSubmissionService {
         submission.setCodeSizeBytes(storedCode.getSizeBytes());
         submission.setCodeContent(null);
         
-        if (dto.getRewardAmount() == null || dto.getRewardAmount() <= 0) {
-            throw new RuntimeException("Reward amount must be greater than 0");
+        // Reward compatibility:
+        // - backend payout uses `rewardAmount` as CRITICAL base (multiplier 1.0).
+        // - the UI sends a full reward breakdown; we map critical -> rewardAmount.
+        Double criticalReward = dto.getRewardCriticalSeverity() != null
+                ? dto.getRewardCriticalSeverity()
+                : dto.getRewardAmount();
+        if (criticalReward == null || criticalReward <= 0) {
+            throw new RuntimeException("Critical reward amount must be greater than 0");
         }
-        submission.setRewardAmount(dto.getRewardAmount());
-        submission.setWebsite(dto.getWebsite()); // Set website URL
+
+        submission.setRewardCriticalSeverity(dto.getRewardCriticalSeverity());
+        submission.setRewardLowSeverity(dto.getRewardLowSeverity());
+        submission.setRewardMediumSeverity(dto.getRewardMediumSeverity());
+        submission.setRewardHighSeverity(dto.getRewardHighSeverity());
+
+        submission.setRewardAmount(criticalReward);
+
+        // Program metadata (optional fields; backward compatible)
+        submission.setWebsite(dto.getWebsite());
+        submission.setInScopeTargets(dto.getInScopeTargets());
+        submission.setOutOfScopeTargets(dto.getOutOfScopeTargets());
+        submission.setAllowedTestingTypes(dto.getAllowedTestingTypes());
+        submission.setRestrictedActions(dto.getRestrictedActions());
+        submission.setEnvironmentSetting(dto.getEnvironmentSetting());
+        submission.setAccessControl(dto.getAccessControl());
+        submission.setTestingCredentialsEmail(dto.getTestingEmail());
+        submission.setAgreedDisclosure(dto.getAgreedDisclosure());
+        submission.setAgreedNoHarm(dto.getAgreedNoHarm());
+
+        if (dto.getStartDate() != null && !dto.getStartDate().isBlank()) {
+            LocalDate d = LocalDate.parse(dto.getStartDate().trim());
+            submission.setProgramStartAt(d.atStartOfDay());
+        }
+        if (dto.getEndDate() != null && !dto.getEndDate().isBlank()) {
+            LocalDate d = LocalDate.parse(dto.getEndDate().trim());
+            submission.setProgramEndAt(d.atStartOfDay());
+        }
         submission.setCompany(company);
         submission.setStatus("OPEN");
         submission.setCreatedAtIfNew(); // Set timestamps for MongoDB
@@ -271,7 +304,27 @@ public class CodeSubmissionService {
         submission.setCodeSizeBytes(storedCode.getSizeBytes());
         submission.setCodeContent(null);
 
-        submission.setRewardAmount(dto.getRewardAmount());
+        Double criticalReward = dto.getRewardCriticalSeverity() != null
+                ? dto.getRewardCriticalSeverity()
+                : dto.getRewardAmount();
+        if (criticalReward != null) {
+            submission.setRewardCriticalSeverity(dto.getRewardCriticalSeverity());
+            submission.setRewardLowSeverity(dto.getRewardLowSeverity());
+            submission.setRewardMediumSeverity(dto.getRewardMediumSeverity());
+            submission.setRewardHighSeverity(dto.getRewardHighSeverity());
+            submission.setRewardAmount(criticalReward);
+        }
+
+        // Optional new metadata (safe no-ops if missing)
+        submission.setInScopeTargets(dto.getInScopeTargets());
+        submission.setOutOfScopeTargets(dto.getOutOfScopeTargets());
+        submission.setAllowedTestingTypes(dto.getAllowedTestingTypes());
+        submission.setRestrictedActions(dto.getRestrictedActions());
+        submission.setEnvironmentSetting(dto.getEnvironmentSetting());
+        submission.setAccessControl(dto.getAccessControl());
+        submission.setTestingCredentialsEmail(dto.getTestingEmail());
+        submission.setAgreedDisclosure(dto.getAgreedDisclosure());
+        submission.setAgreedNoHarm(dto.getAgreedNoHarm());
         submission.setStatus(dto.getStatus());
         submission.updateTimestamp(); // Update timestamp for MongoDB
 
@@ -318,7 +371,29 @@ public class CodeSubmissionService {
             fileList.add(fileMap);
         }
         dto.setFiles(fileList);
-        
+
+        // Program configuration fields (if present)
+        dto.setInScopeTargets(submission.getInScopeTargets());
+        dto.setOutOfScopeTargets(submission.getOutOfScopeTargets());
+        dto.setAllowedTestingTypes(submission.getAllowedTestingTypes());
+        dto.setRestrictedActions(submission.getRestrictedActions());
+        dto.setRewardLowSeverity(submission.getRewardLowSeverity());
+        dto.setRewardMediumSeverity(submission.getRewardMediumSeverity());
+        dto.setRewardHighSeverity(submission.getRewardHighSeverity());
+        dto.setRewardCriticalSeverity(submission.getRewardCriticalSeverity());
+        dto.setEnvironmentSetting(submission.getEnvironmentSetting());
+        dto.setAccessControl(submission.getAccessControl());
+        dto.setTestingEmail(submission.getTestingCredentialsEmail());
+        dto.setAgreedDisclosure(submission.getAgreedDisclosure());
+        dto.setAgreedNoHarm(submission.getAgreedNoHarm());
+
+        if (submission.getProgramStartAt() != null) {
+            dto.setStartDate(submission.getProgramStartAt().toLocalDate().toString());
+        }
+        if (submission.getProgramEndAt() != null) {
+            dto.setEndDate(submission.getProgramEndAt().toLocalDate().toString());
+        }
+
         return dto;
     }
 }

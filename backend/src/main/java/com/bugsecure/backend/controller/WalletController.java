@@ -67,8 +67,23 @@ public class WalletController {
             Double amount = Double.parseDouble(body.get("amount").toString());
             String description = body.containsKey("description") ? 
                     body.get("description").toString() : null;
+            String currency = body.containsKey("currency") && body.get("currency") != null
+                    ? body.get("currency").toString()
+                    : "USD";
+            String idempotencyKey = body.containsKey("idempotencyKey") && body.get("idempotencyKey") != null
+                    ? body.get("idempotencyKey").toString()
+                    : null;
 
-            WalletDTO wallet = walletService.deposit(userDetails.getUsername(), amount, description);
+            WalletDTO wallet;
+            try {
+                wallet = walletService.deposit(userDetails.getUsername(), amount, description, currency, idempotencyKey);
+            } catch (RuntimeException ex) {
+                if ("IDEMPOTENT_REPLAY".equals(ex.getMessage())) {
+                    wallet = walletService.getWallet(userDetails.getUsername());
+                } else {
+                    throw ex;
+                }
+            }
             response.put("success", true);
             response.put("data", wallet);
             response.put("message", "Deposit successful");
@@ -125,18 +140,61 @@ public class WalletController {
                 ifscCode = body.get("ifscCode").toString();
             }
 
-            WalletDTO wallet = walletService.withdraw(
+            String currency = body.containsKey("currency") && body.get("currency") != null
+                    ? body.get("currency").toString()
+                    : "USD";
+            String idempotencyKey = body.containsKey("idempotencyKey") && body.get("idempotencyKey") != null
+                    ? body.get("idempotencyKey").toString()
+                    : null;
+
+            WalletDTO wallet;
+            try {
+                wallet = walletService.withdraw(
                 userDetails.getUsername(), 
                 amount, 
                 description,
                 withdrawalMethod,
                 withdrawalReference,
                 accountHolderName,
-                ifscCode
-            );
+                ifscCode,
+                currency,
+                idempotencyKey
+                );
+            } catch (RuntimeException ex) {
+                if ("IDEMPOTENT_REPLAY".equals(ex.getMessage())) {
+                    wallet = walletService.getWallet(userDetails.getUsername());
+                } else {
+                    throw ex;
+                }
+            }
             response.put("success", true);
             response.put("data", wallet);
             response.put("message", "Withdrawal successful");
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            response.put("success", false);
+            response.put("error", e.getMessage());
+            return ResponseEntity.badRequest().body(response);
+        }
+    }
+
+    @PostMapping("/currency")
+    public ResponseEntity<Map<String, Object>> setCurrency(
+            @RequestBody Map<String, Object> body,
+            Authentication authentication) {
+        Map<String, Object> response = new HashMap<>();
+        try {
+            UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+            String currency = body.containsKey("currency") && body.get("currency") != null
+                    ? body.get("currency").toString()
+                    : "USD";
+            User user = userRepository.findByEmail(userDetails.getUsername())
+                    .orElseThrow(() -> new RuntimeException("User not found"));
+            user.setCurrency(currency == null ? "USD" : currency.trim().toUpperCase());
+            userRepository.save(user);
+            WalletDTO wallet = walletService.getWallet(userDetails.getUsername());
+            response.put("success", true);
+            response.put("data", wallet);
             return ResponseEntity.ok(response);
         } catch (Exception e) {
             response.put("success", false);

@@ -9,6 +9,11 @@ import com.bugsecure.backend.repository.UserRepository;
 import com.bugsecure.backend.repository.WalletTransactionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,6 +36,12 @@ public class WalletService {
     @Autowired
     private PaymentRepository paymentRepository;
 
+    @Autowired
+    private MongoTemplate mongoTemplate;
+
+    @Autowired
+    private CurrencyConversionService currencyConversionService;
+
     @Value("${platform.admin.email:bugsecure12admin@gmail.com}")
     private String platformAdminEmail;
 
@@ -45,6 +56,9 @@ public class WalletService {
         if (user.getWalletAddress() == null || user.getWalletAddress().isEmpty()) {
             user.setWalletAddress(generateWalletAddress());
             user.setBalance(0.0);
+            if (user.getCurrency() == null || user.getCurrency().isBlank()) {
+                user.setCurrency("USD");
+            }
             user = userRepository.save(user);
         }
 
@@ -65,7 +79,7 @@ public class WalletService {
 
     // Deposit funds (Only for Companies)
     @Transactional
-    public WalletDTO deposit(String email, Double amount, String description) {
+    public WalletDTO deposit(String email, Double amount, String description, String currency, String idempotencyKey) {
         if (amount <= 0) {
             throw new RuntimeException("Deposit amount must be greater than 0");
         }
@@ -88,20 +102,37 @@ public class WalletService {
             user.setWalletAddress(generateWalletAddress());
             user.setBalance(0.0);
         }
+        if (user.getCurrency() == null || user.getCurrency().isBlank()) {
+            user.setCurrency("USD");
+        }
 
-        // Update balance
-        Double currentBalance = user.getBalance() != null ? user.getBalance() : 0.0;
-        user.setBalance(currentBalance + amount);
-        user = userRepository.save(user);
+        String txHash = (idempotencyKey != null && !idempotencyKey.isBlank())
+                ? idempotencyKey.trim()
+                : generateTransactionHash();
+
+        walletTransactionRepository.findByTransactionHash(txHash).ifPresent(existing -> {
+            if ("COMPLETED".equalsIgnoreCase(existing.getStatus())) {
+                // Idempotent replay; no-op
+                throw new RuntimeException("IDEMPOTENT_REPLAY");
+            }
+        });
+
+        String normalizedCurrency = currencyConversionService.normalizeCurrency(currency);
+        double amountUsd = currencyConversionService.toUsd(amount, normalizedCurrency);
+
+        // Atomic balance update
+        user = incBalanceAtomic(user.getId(), amountUsd);
 
         // Create transaction record
         WalletTransaction transaction = new WalletTransaction();
         transaction.setTransactionType("DEPOSIT");
         transaction.setAmount(amount);
+        transaction.setAmountUsd(amountUsd);
+        transaction.setCurrency(normalizedCurrency);
         transaction.setUser(user);
         transaction.setStatus("COMPLETED");
         transaction.setDescription(description != null ? description : "Wallet deposit");
-        transaction.setTransactionHash(generateTransactionHash());
+        transaction.setTransactionHash(txHash);
         transaction.setCreatedAtIfNew();
         walletTransactionRepository.save(transaction);
 
@@ -112,7 +143,8 @@ public class WalletService {
     @Transactional
     public WalletDTO withdraw(String email, Double amount, String description, 
                              String withdrawalMethod, String withdrawalReference,
-                             String accountHolderName, String ifscCode) {
+                             String accountHolderName, String ifscCode,
+                             String currency, String idempotencyKey) {
         if (amount <= 0) {
             throw new RuntimeException("Withdrawal amount must be greater than 0");
         }
@@ -129,10 +161,12 @@ public class WalletService {
             throw new RuntimeException("Wallet not found. Please create a wallet first.");
         }
 
-        Double currentBalance = user.getBalance() != null ? user.getBalance() : 0.0;
-        if (currentBalance < amount) {
-            throw new RuntimeException("Insufficient balance");
+        if (user.getCurrency() == null || user.getCurrency().isBlank()) {
+            user.setCurrency("USD");
         }
+
+        String normalizedCurrency = currencyConversionService.normalizeCurrency(currency);
+        double amountUsd = currencyConversionService.toUsd(amount, normalizedCurrency);
 
         // Validate withdrawal method and reference
         if (withdrawalMethod == null || withdrawalMethod.trim().isEmpty()) {
@@ -185,14 +219,25 @@ public class WalletService {
             }
         }
 
-        // Update balance
-        user.setBalance(currentBalance - amount);
-        user = userRepository.save(user);
+        String txHash = (idempotencyKey != null && !idempotencyKey.isBlank())
+                ? idempotencyKey.trim()
+                : generateTransactionHash();
+
+        walletTransactionRepository.findByTransactionHash(txHash).ifPresent(existing -> {
+            if ("COMPLETED".equalsIgnoreCase(existing.getStatus())) {
+                throw new RuntimeException("IDEMPOTENT_REPLAY");
+            }
+        });
+
+        // Atomic guarded decrement (prevents negative balance)
+        user = decBalanceAtomic(user.getId(), amountUsd);
 
         // Create transaction record with withdrawal details
         WalletTransaction transaction = new WalletTransaction();
         transaction.setTransactionType("WITHDRAWAL");
         transaction.setAmount(amount);
+        transaction.setAmountUsd(amountUsd);
+        transaction.setCurrency(normalizedCurrency);
         transaction.setUser(user);
         transaction.setStatus("PENDING"); // Withdrawals are pending until processed
         transaction.setDescription(description != null ? description : 
@@ -201,11 +246,31 @@ public class WalletService {
         transaction.setWithdrawalReference(withdrawalReference);
         transaction.setAccountHolderName(accountHolderName);
         transaction.setIfscCode(ifscCode);
-        transaction.setTransactionHash(generateTransactionHash());
+        transaction.setTransactionHash(txHash);
         transaction.setCreatedAtIfNew();
         walletTransactionRepository.save(transaction);
 
         return convertToWalletDTO(user);
+    }
+
+    private User incBalanceAtomic(String userId, double amountUsd) {
+        if (amountUsd <= 0) throw new RuntimeException("Amount must be > 0");
+        Query q = new Query(Criteria.where("_id").is(userId));
+        Update u = new Update().inc("balance", amountUsd);
+        FindAndModifyOptions opts = FindAndModifyOptions.options().returnNew(true);
+        User updated = mongoTemplate.findAndModify(q, u, opts, User.class);
+        if (updated == null) throw new RuntimeException("Failed to update wallet balance");
+        return updated;
+    }
+
+    private User decBalanceAtomic(String userId, double amountUsd) {
+        if (amountUsd <= 0) throw new RuntimeException("Amount must be > 0");
+        Query q = new Query(Criteria.where("_id").is(userId).and("balance").gte(amountUsd));
+        Update u = new Update().inc("balance", -amountUsd);
+        FindAndModifyOptions opts = FindAndModifyOptions.options().returnNew(true);
+        User updated = mongoTemplate.findAndModify(q, u, opts, User.class);
+        if (updated == null) throw new RuntimeException("Insufficient balance");
+        return updated;
     }
 
     // Transfer funds from company to researcher (wallet-based only)
@@ -241,19 +306,9 @@ public class WalletService {
             toResearcher.setBalance(0.0);
         }
 
-        // Validate company balance
-        Double companyBalance = fromCompany.getBalance() != null ? fromCompany.getBalance() : 0.0;
-        if (companyBalance < amount) {
-            throw new RuntimeException("Insufficient balance in company wallet");
-        }
-
-        // Update balances
-        fromCompany.setBalance(companyBalance - amount);
-        Double researcherBalance = toResearcher.getBalance() != null ? toResearcher.getBalance() : 0.0;
-        toResearcher.setBalance(researcherBalance + amount);
-
-        userRepository.save(fromCompany);
-        userRepository.save(toResearcher);
+        // Atomic update balances (USD canonical)
+        fromCompany = decBalanceAtomic(fromCompany.getId(), amount);
+        toResearcher = incBalanceAtomic(toResearcher.getId(), amount);
 
         // Create transaction records with mirrored entries
         String transactionHash = generateTransactionHash();
@@ -262,6 +317,8 @@ public class WalletService {
         WalletTransaction companyTransaction = new WalletTransaction();
         companyTransaction.setTransactionType("TRANSFER");
         companyTransaction.setAmount(amount);
+        companyTransaction.setAmountUsd(amount);
+        companyTransaction.setCurrency("USD");
         companyTransaction.setUser(fromCompany);
         companyTransaction.setToUser(toResearcher);
         companyTransaction.setStatus("COMPLETED");
@@ -275,6 +332,8 @@ public class WalletService {
         WalletTransaction researcherTransaction = new WalletTransaction();
         researcherTransaction.setTransactionType("REWARD");
         researcherTransaction.setAmount(amount);
+        researcherTransaction.setAmountUsd(amount);
+        researcherTransaction.setCurrency("USD");
         researcherTransaction.setUser(toResearcher);
         researcherTransaction.setFromUser(fromCompany);
         researcherTransaction.setStatus("COMPLETED");
@@ -362,21 +421,10 @@ public class WalletService {
             platformAdmin.setBalance(0.0);
         }
 
-        Double companyBalance = fromCompany.getBalance() != null ? fromCompany.getBalance() : 0.0;
-        if (companyBalance < bountyAmountUSD) {
-            throw new RuntimeException("Insufficient balance in company wallet");
-        }
-
-        // Update balances
-        fromCompany.setBalance(companyBalance - bountyAmountUSD);
-        Double researcherBalance = toResearcher.getBalance() != null ? toResearcher.getBalance() : 0.0;
-        toResearcher.setBalance(researcherBalance + researcherNetAmountUSD);
-        Double platformBalance = platformAdmin.getBalance() != null ? platformAdmin.getBalance() : 0.0;
-        platformAdmin.setBalance(platformBalance + platformCommissionAmountUSD);
-
-        userRepository.save(fromCompany);
-        userRepository.save(toResearcher);
-        userRepository.save(platformAdmin);
+        // Atomic update balances (USD canonical)
+        fromCompany = decBalanceAtomic(fromCompany.getId(), bountyAmountUSD);
+        toResearcher = incBalanceAtomic(toResearcher.getId(), researcherNetAmountUSD);
+        platformAdmin = incBalanceAtomic(platformAdmin.getId(), platformCommissionAmountUSD);
 
         // Shared transaction hash to link mirrored entries
         String transactionHash = generateTransactionHash();
@@ -385,6 +433,8 @@ public class WalletService {
         WalletTransaction companyTransaction = new WalletTransaction();
         companyTransaction.setTransactionType("TRANSFER");
         companyTransaction.setAmount(bountyAmountUSD);
+        companyTransaction.setAmountUsd(bountyAmountUSD);
+        companyTransaction.setCurrency("USD");
         companyTransaction.setUser(fromCompany);
         companyTransaction.setToUser(toResearcher);
         companyTransaction.setStatus("COMPLETED");
@@ -397,6 +447,8 @@ public class WalletService {
         WalletTransaction researcherTransaction = new WalletTransaction();
         researcherTransaction.setTransactionType("REWARD");
         researcherTransaction.setAmount(researcherNetAmountUSD);
+        researcherTransaction.setAmountUsd(researcherNetAmountUSD);
+        researcherTransaction.setCurrency("USD");
         researcherTransaction.setUser(toResearcher);
         researcherTransaction.setFromUser(fromCompany);
         researcherTransaction.setStatus("COMPLETED");
@@ -409,6 +461,8 @@ public class WalletService {
         WalletTransaction platformTransaction = new WalletTransaction();
         platformTransaction.setTransactionType("REWARD");
         platformTransaction.setAmount(platformCommissionAmountUSD);
+        platformTransaction.setAmountUsd(platformCommissionAmountUSD);
+        platformTransaction.setCurrency("USD");
         platformTransaction.setUser(platformAdmin);
         platformTransaction.setStatus("COMPLETED");
         platformTransaction.setDescription(platformDescription != null ? platformDescription : "BugSecure platform commission");
@@ -440,18 +494,9 @@ public class WalletService {
             toUser.setBalance(0.0);
         }
 
-        Double fromBalance = fromUser.getBalance() != null ? fromUser.getBalance() : 0.0;
-        if (fromBalance < amount) {
-            throw new RuntimeException("Insufficient balance");
-        }
-
-        // Update balances
-        fromUser.setBalance(fromBalance - amount);
-        Double toBalance = toUser.getBalance() != null ? toUser.getBalance() : 0.0;
-        toUser.setBalance(toBalance + amount);
-
-        userRepository.save(fromUser);
-        userRepository.save(toUser);
+        // Atomic update balances (USD canonical)
+        fromUser = decBalanceAtomic(fromUser.getId(), amount);
+        toUser = incBalanceAtomic(toUser.getId(), amount);
 
         // Create transaction records
         String transactionHash = generateTransactionHash();
@@ -460,6 +505,8 @@ public class WalletService {
         WalletTransaction fromTransaction = new WalletTransaction();
         fromTransaction.setTransactionType("TRANSFER");
         fromTransaction.setAmount(amount);
+        fromTransaction.setAmountUsd(amount);
+        fromTransaction.setCurrency("USD");
         fromTransaction.setUser(fromUser);
         fromTransaction.setToUser(toUser);
         fromTransaction.setStatus("COMPLETED");
@@ -472,6 +519,8 @@ public class WalletService {
         WalletTransaction toTransaction = new WalletTransaction();
         toTransaction.setTransactionType("TRANSFER");
         toTransaction.setAmount(amount);
+        toTransaction.setAmountUsd(amount);
+        toTransaction.setCurrency("USD");
         toTransaction.setUser(toUser);
         toTransaction.setFromUser(fromUser);
         toTransaction.setStatus("COMPLETED");
@@ -494,9 +543,7 @@ public class WalletService {
             user.setBalance(0.0);
         }
 
-        Double currentBalance = user.getBalance() != null ? user.getBalance() : 0.0;
-        user.setBalance(currentBalance + amount);
-        user = userRepository.save(user);
+        user = incBalanceAtomic(user.getId(), amount);
 
         // Link to payment if provided
         Payment payment = null;
@@ -508,6 +555,8 @@ public class WalletService {
         WalletTransaction transaction = new WalletTransaction();
         transaction.setTransactionType("REWARD");
         transaction.setAmount(amount);
+        transaction.setAmountUsd(amount);
+        transaction.setCurrency("USD");
         transaction.setUser(user);
         transaction.setPayment(payment);
         transaction.setStatus("COMPLETED");
@@ -545,7 +594,9 @@ public class WalletService {
         WalletDTO dto = new WalletDTO();
         dto.setWalletAddress(user.getWalletAddress());
         dto.setBalance(user.getBalance() != null ? user.getBalance() : 0.0);
-        dto.setCurrency("USD");
+        dto.setCurrency(user.getCurrency() != null && !user.getCurrency().isBlank()
+                ? currencyConversionService.normalizeCurrency(user.getCurrency())
+                : "USD");
 
         // Load transaction history
         List<WalletTransaction> transactions = walletTransactionRepository

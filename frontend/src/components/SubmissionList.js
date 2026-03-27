@@ -1,12 +1,9 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import API from "../services/api";
-import BugReportForm from "./BugReportForm";
 import { convertUSDToINR } from "../utils/currency";
 
 const SubmissionList = ({ submissions, onUpdate, onViewBugReports, isCompanyView }) => {
-  const [selectedSubmission, setSelectedSubmission] = useState(null);
-  const [showBugReportForm, setShowBugReportForm] = useState(false);
   const navigate = useNavigate();
 
   const currentUser = JSON.parse(localStorage.getItem("user") || "{}");
@@ -55,18 +52,6 @@ const SubmissionList = ({ submissions, onUpdate, onViewBugReports, isCompanyView
       console.error("Error updating submission:", error);
       alert("Failed to update submission status");
     }
-  };
-
-  const handleSubmitBugReport = (submissionId) => {
-    const submission = submissions.find((s) => s.id === submissionId);
-    setSelectedSubmission(submission);
-    setShowBugReportForm(true);
-  };
-
-  const handleBugReportSubmitted = () => {
-    setShowBugReportForm(false);
-    setSelectedSubmission(null);
-    navigate("/dashboard");
   };
 
   const closePreview = () => {
@@ -147,34 +132,8 @@ const SubmissionList = ({ submissions, onUpdate, onViewBugReports, isCompanyView
 
   const handleStartSandbox = async (submissionId) => {
     if (!canStartSandbox) return;
-
-    setSandboxLoadingBySubmissionId((prev) => ({ ...prev, [submissionId]: true }));
-    try {
-      const res = await API.post(`/api/sandbox/start/${submissionId}`);
-      if (res.data?.success) {
-        const sandboxData = res.data?.data || {};
-        const { sandboxId, url } = sandboxData;
-
-        if (sandboxId) {
-          navigate(`/sandbox/${sandboxId}`);
-        } else if (url) {
-          // Backwards fallback: open returned URL directly.
-          window.open(url, "_blank", "noopener,noreferrer");
-        } else {
-          alert("Sandbox started but neither sandboxId nor URL were returned.");
-        }
-
-        if (sandboxId) {
-          setActiveSandboxBySubmissionId((prev) => ({ ...prev, [submissionId]: sandboxId }));
-        }
-      } else {
-        alert(res.data?.error || "Failed to start sandbox");
-      }
-    } catch (e) {
-      alert(e?.response?.data?.error || "Failed to start sandbox");
-    } finally {
-      setSandboxLoadingBySubmissionId((prev) => ({ ...prev, [submissionId]: false }));
-    }
+    // New UX: jump straight into the Testing Panel workflow.
+    navigate(`/testing/${submissionId}`);
   };
 
   const handleStopSandbox = async (submissionId) => {
@@ -214,15 +173,6 @@ const SubmissionList = ({ submissions, onUpdate, onViewBugReports, isCompanyView
 
   return (
     <div>
-      {showBugReportForm && selectedSubmission && (
-        <div className="mb-6">
-          <BugReportForm
-            submissionId={selectedSubmission.id}
-            onBugReportSubmitted={handleBugReportSubmitted}
-          />
-        </div>
-      )}
-
       <div className="space-y-4">
         {submissions.map((submission) => (
           <div
@@ -295,36 +245,25 @@ const SubmissionList = ({ submissions, onUpdate, onViewBugReports, isCompanyView
                     onClick={() => handlePreviewCode(submission.id)}
                     className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition text-xs md:text-sm"
                   >
-                    Preview Code
+                    📄 View Code
                   </button>
                 </div>
 
-                  {canStartSandbox && (
-                    <div className="flex flex-wrap gap-2">
-                      {activeSandboxBySubmissionId?.[submission.id] ? (
-                        <button
-                          onClick={() => handleStopSandbox(submission.id)}
-                          disabled={sandboxLoadingBySubmissionId?.[submission.id]}
-                          className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded-lg font-semibold transition text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {sandboxLoadingBySubmissionId?.[submission.id] ? "Stopping..." : "Stop Testing"}
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => handleStartSandbox(submission.id)}
-                          disabled={sandboxLoadingBySubmissionId?.[submission.id]}
-                          className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg font-semibold transition text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {sandboxLoadingBySubmissionId?.[submission.id] ? "Starting..." : "Start Testing"}
-                        </button>
-                      )}
-                    </div>
-                  )}
+                {canStartSandbox && (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      onClick={() => handleStartSandbox(submission.id)}
+                      className="flex-1 sm:flex-none px-3 md:px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg font-semibold transition text-xs md:text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      🧪 Start Testing
+                    </button>
+                  </div>
+                )}
 
                 {submission.files && submission.files.length > 0 && (
                   <details>
                     <summary className="cursor-pointer text-blue-400 hover:text-blue-300 font-semibold mb-1 text-sm md:text-base">
-                      Attachments ({submission.files.length})
+                      📎 Attachments ({submission.files.length})
                     </summary>
                     <div className="space-y-2 mt-2">
                       {submission.files.map((file) => (
@@ -377,16 +316,7 @@ const SubmissionList = ({ submissions, onUpdate, onViewBugReports, isCompanyView
                     Delete
                   </button>
                 </>
-              ) : (
-                submission.status === "OPEN" && (
-                  <button
-                    onClick={() => handleSubmitBugReport(submission.id)}
-                    className="w-full sm:w-auto px-4 md:px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition text-sm md:text-base"
-                  >
-                    Submit Bug Report
-                  </button>
-                )
-              )}
+              ) : null}
             </div>
           </div>
         ))}

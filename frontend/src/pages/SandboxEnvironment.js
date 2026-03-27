@@ -147,6 +147,18 @@ const SandboxEnvironment = () => {
             </button>
             <button
               type="button"
+              onClick={() => {
+                if (!sandboxInfo?.submissionId) return;
+                navigate(`/testing/${sandboxInfo.submissionId}`);
+              }}
+              className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={execLoading || !sandboxInfo?.submissionId}
+              title={sandboxInfo?.submissionId ? "Open Testing Panel" : "Submission not available yet"}
+            >
+              Testing Panel
+            </button>
+            <button
+              type="button"
               onClick={() => navigate("/dashboard")}
               className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={execLoading}
